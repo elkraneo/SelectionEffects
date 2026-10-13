@@ -50,7 +50,7 @@ extension RealityViewCameraContent {
 		// `ARView.renderCallbacks` setter that backs it force-unwraps the camera's
 		// RECameraViewDescriptorsComponent, which exists only once rendering has
 		// started. Apple's documentation sets no timing rule for this property, so
-		// this is most likely a RealityKit bug. See Docs/PostProcessTiming.md;
+		// this is most likely a RealityKit bug (FB25173230). See Docs/PostProcessTiming.md;
 		// remove this workaround once it's fixed.
 		var content = self
 		let host = SelectionEffectsHost(

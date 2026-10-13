@@ -1,6 +1,6 @@
 # Setting `customPostProcessing` before the first frame crashes
 
-**Status:** Observed on macOS 27.0.1. Not yet reported to Apple (FB number to be added).
+**Status:** Observed on macOS 27.0.1. Reported to Apple as **FB25173230** (2026-10-13).
 **Workaround in this package:** `installSelectionEffects()` attaches the effect from `SelectionEffectSystem.update(context:)` on the first scene update, not in the make closure. See `Sources/SelectionEffects/RealityView+SelectionEffects.swift`. The reproduction below uses a `SceneEvents.Update` subscription for the same "after the first update" timing, because it can't use the package. The package's own hook was tested separately: installing synchronously in make, 8 of 8 runs drew the outline without crashing.
 
 ## Summary
@@ -59,7 +59,7 @@ So the setter force-unwraps the camera's `RECameraViewDescriptorsComponent`, whi
 - The make closure is where RealityView content is configured in Apple's documentation and WWDC samples (camera, environment, anchors, tracking sessions).
 - Writing a property shouldn't trap. Even when the view isn't ready, the effect could be stored and applied once it is.
 
-## Feedback text (draft)
+## Feedback text (as filed)
 
 > **RealityView: setting `renderingEffects.customPostProcessing` in the make closure crashes (EXC_BREAKPOINT in `ARView.renderCallbacks.setter`)**
 >

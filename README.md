@@ -100,13 +100,13 @@ Render callbacks you've already set are kept and run before the effects.
 - Mesh swaps and hierarchy changes are picked up automatically. After editing a mesh in place (`MeshResource.replace(with:)`, a `LowLevelMesh` buffer update), call `SelectionEffectComponent.reloadGeometry(of:)`.
 - Cached geometry of released entities is dropped while any view draws selection effects. `SelectionEffectComponent.clearGeometryCache()` frees it all, for example after closing the last view.
 - If your own systems move selected entities, run them before `SelectionEffectSystem` (`static var dependencies: [SystemDependency] { [.before(SelectionEffectSystem.self)] }`), or outlines lag a frame behind.
-- `installSelectionEffects()` attaches the post-process on the first frame. On macOS 27, setting a `RealityView`'s `customPostProcessing` before the view has rendered crashes inside RealityKit, even with a pass-through effect. Details and a standalone reproduction: [Docs/PostProcessTiming.md](Docs/PostProcessTiming.md).
+- `installSelectionEffects()` attaches the post-process on the first frame. On macOS 27, setting a `RealityView`'s `customPostProcessing` before the view has rendered crashes inside RealityKit, even with a pass-through effect. Reported as FB25173230; details and a standalone reproduction: [Docs/PostProcessTiming.md](Docs/PostProcessTiming.md).
 - `installSelectionEffects()` adds one hidden entity named `SelectionEffects` to the view's content (it carries the view's renderer).
 - Run-tested on macOS 27, with RealityView and ARView, including `.shader`. iOS, tvOS and visionOS are build-tested.
 
 ### Known limitations
 
-- RealityKit's entity queries don't return the meshes USDKit's `USDStageComponent` generates (on macOS 27, USDKit marks them hidden through SPI). The system finds selected ones by walking the subtrees of `USDStageComponent` entities every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate. To find those entities in your own code, use `entity.descendants(where:)` on the stage entity. Details and a standalone reproduction: [Docs/USDKitHiddenEntities.md](Docs/USDKitHiddenEntities.md).
+- RealityKit's entity queries don't return the meshes USDKit's `USDStageComponent` generates (on macOS 27, USDKit marks them hidden through SPI). The system finds selected ones by walking the subtrees of `USDStageComponent` entities every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate. To find those entities in your own code, use `entity.descendants(where:)` on the stage entity. Reported as FB25173225; details and a standalone reproduction: [Docs/USDKitHiddenEntities.md](Docs/USDKitHiddenEntities.md).
 - A USDKit-generated entity that your code moves out of its stage before the next scan isn't found. (Removing `USDStageComponent` removes the generated entities, so this only happens when you reparent them yourself.)
 - Instanced meshes (`MeshInstancesComponent`) are outlined once, at the entity's transform, not at each instance.
 - Skinned and blend-shape meshes are outlined in their rest pose: the outline doesn't follow skeletal or vertex deformation.

@@ -15,8 +15,8 @@ import USDKit  // with RealityKit, brings in USDStageComponent
 // hidden through SPI (`Entity.isHidden`, not in the SDK). On macOS 27, USDKit
 // marks every entity its `USDStageComponent` generates, so those meshes are
 // missing from `Scene.performQuery` and send no component events, though they
-// render and are reachable through `children`. The stage entity itself is
-// queryable, which is where the walk below starts.
+// render and are reachable through `children` (FB25173225). The stage entity
+// itself is queryable, which is where the walk below starts.
 
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, visionOS 1.0, *)
 extension Entity {
