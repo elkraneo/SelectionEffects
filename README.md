@@ -5,7 +5,7 @@ Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffect
 ## Install
 
 ```swift
-.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.1.0")
+.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.2.0")
 ```
 
 | | `RealityView` (SwiftUI) | `ARView` (UIKit / AppKit) |
