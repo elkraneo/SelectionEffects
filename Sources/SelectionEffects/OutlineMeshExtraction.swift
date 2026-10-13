@@ -144,11 +144,13 @@ enum OutlineMeshExtraction {
 		// USDStageComponent), MeshResource.Contents reads the interleaved vertex
 		// buffer as packed positions — on macOS 27 a 13,482-vertex mesh came back
 		// as 89,880 "positions" starting with a normal — which draws spikes.
-		// Cached by the LowLevelMesh's identity: buffers updated in place aren't
+		// Cached by the MeshResource's identity, not the LowLevelMesh's:
+		// `lowLevelMesh` returns a new wrapper on every read (macOS 27), so keying
+		// on it re-read the mesh every frame. Buffers updated in place aren't
 		// re-read until `reloadGeometry(of:)`.
 		if #available(iOS 18.0, macOS 15.0, *),
 			let low = model.mesh.lowLevelMesh,
-			let data = cache.lowLevelContents(of: low, owner: entity, extract: { extractFromLowLevel(low) })
+			let data = cache.lowLevelContents(of: model.mesh, owner: entity, extract: { extractFromLowLevel(low) })
 		{
 			meshes.append(
 				OutlineSelectedMesh(owner: entity, localTransform: matrix_identity_float4x4, data: data)
