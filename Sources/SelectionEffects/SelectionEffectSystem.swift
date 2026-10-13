@@ -5,6 +5,7 @@
 //  Created by Cristian Díaz on 13.10.26.
 //
 
+import Combine
 import RealityKit
 import os
 import simd
@@ -119,11 +120,37 @@ public struct SelectionEffectSystem: System {
 	#endif
 
 	private var shaders = ShaderSelectionDriver()
+	private let tracked = TrackedSelection()
+	private var updatesSinceScan = Int.max - 1
+	/// Updates between hierarchy scans (about 100 ms at 60 fps).
+	private static let scanInterval = 6
+	private var subscriptions: [any Cancellable] = []
 
-	public init(scene: RealityKit.Scene) {}
+	public init(scene: RealityKit.Scene) {
+		// Component events catch most owners between scans (see `update`).
+		let tracked = tracked
+		subscriptions = [
+			scene.subscribe(to: ComponentEvents.DidAdd.self, componentType: SelectionEffectComponent.self) { event in
+				tracked.insert(event.entity)
+			},
+			scene.subscribe(to: ComponentEvents.WillRemove.self, componentType: SelectionEffectComponent.self) { event in
+				tracked.remove(event.entity)
+			},
+		]
+	}
 
 	public mutating func update(context: SceneUpdateContext) {
-		let selected = Array(context.scene.performQuery(Self.selected))
+		// Entity queries don't return every entity: on macOS 27 the meshes that
+		// USDKit's USDStageComponent generates are missing from performQuery (even
+		// for ModelComponent) and send no component events, though they're in the
+		// scene and reachable through `children`. So every few updates, walk the
+		// hierarchy below the queried entities for owners the query missed.
+		updatesSinceScan += 1
+		if updatesSinceScan >= Self.scanInterval {
+			updatesSinceScan = 0
+			tracked.scan(context.scene)
+		}
+		let selected = tracked.merged(with: Array(context.scene.performQuery(Self.selected)))
 		shaders.update(selected: selected, deltaTime: context.deltaTime)
 
 		#if !os(visionOS)
@@ -138,6 +165,50 @@ public struct SelectionEffectSystem: System {
 	}
 
 	@MainActor private static var registered = false
+
+	/// Owners of `SelectionEffectComponent` seen through component events.
+	@MainActor
+	private final class TrackedSelection {
+		private var entities: [ObjectIdentifier: WeakEntity] = [:]
+		private struct WeakEntity { weak var entity: Entity? }
+
+		func insert(_ entity: Entity) { entities[ObjectIdentifier(entity)] = WeakEntity(entity: entity) }
+		func remove(_ entity: Entity) { entities[ObjectIdentifier(entity)] = nil }
+
+		/// Walks the hierarchy from the scene's root entities and tracks every
+		/// owner of the component, including entities queries don't return.
+		func scan(_ scene: RealityKit.Scene) {
+			// The topmost ancestors of the indexed entities: a root itself may not
+			// be indexed (RealityView's content root isn't, on macOS 27).
+			var roots: [ObjectIdentifier: Entity] = [:]
+			for entity in scene.performQuery(EntityQuery()) {
+				var top = entity
+				while let parent = top.parent { top = parent }
+				roots[ObjectIdentifier(top)] = top
+			}
+			for root in roots.values { visit(root) }
+		}
+
+		private func visit(_ entity: Entity) {
+			if entity.components.has(SelectionEffectComponent.self) { insert(entity) }
+			for child in entity.children { visit(child) }
+		}
+
+		/// `queried` plus tracked entities that still carry the component and
+		/// are in a scene, without duplicates.
+		func merged(with queried: [Entity]) -> [Entity] {
+			var result = queried
+			var seen = Set(queried.map(ObjectIdentifier.init))
+			for (id, weak) in entities {
+				guard let entity = weak.entity, entity.components.has(SelectionEffectComponent.self) else {
+					entities[id] = nil
+					continue
+				}
+				if entity.scene != nil, seen.insert(id).inserted { result.append(entity) }
+			}
+			return result
+		}
+	}
 
 	@MainActor
 	static func registerOnce() {

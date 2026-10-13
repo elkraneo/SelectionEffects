@@ -5,7 +5,7 @@ Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffect
 ## Install
 
 ```swift
-.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.2.0")
+.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.2.1")
 ```
 
 | | `RealityView` (SwiftUI) | `ARView` (UIKit / AppKit) |
@@ -105,6 +105,8 @@ Render callbacks you've already set are kept and run before the effects.
 - Run-tested on macOS 27, with RealityView and ARView, including `.shader`. iOS, tvOS and visionOS are build-tested.
 
 ### Known limitations
+
+- Entities that RealityKit's entity queries don't return (on macOS 27, the meshes USDKit's `USDStageComponent` generates) are found by a hierarchy scan every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate.
 
 - Skinned and blend-shape meshes are outlined in their rest pose: the outline doesn't follow skeletal or vertex deformation.
 - All selections share one silhouette mask. Where a selected entity is in front of another selected one, the rear entity's ring isn't drawn inside the front one's silhouette, even with `occludedOpacity: 1`.
