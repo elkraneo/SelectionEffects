@@ -92,16 +92,17 @@ struct SelectionEffectTests {
 		#expect(component.selectionEffect == .outline(.default))
 		#expect(component.meshSelection == .subtree)
 		let outline = SelectionEffectComponent.OutlineSelectionEffectStyle.default
-		#expect(outline.color == nil && outline.width == 3 && outline.occludedOpacity == 1)
+		#expect(outline.color == SelectionEffectComponent.OutlineSelectionEffectStyle.accentColor)
+		#expect(outline.width == 3 && outline.occludedOpacity == 1)
 		let highlight = SelectionEffectComponent.HighlightSelectionEffectStyle.default
-		#expect(highlight.color == nil && highlight.occludedOpacity == 0)
+		#expect(highlight.strength == 1 && highlight.occludedOpacity == 0)
 	}
 
 	@Test func renderStyleResolvesNilColorToAccent() throws {
 		let style = try #require(SelectionEffectComponent(.highlight(.init(strength: 0.5))).renderStyle)
 		#expect(style.kind == .highlight)
 		#expect(style.width == 0)
-		#expect(style.strength == 0.5)
+		#expect(style.strength == 0.5 * SelectionEffectComponent.highlightCoverage)
 		#expect(style.color.w > 0)
 	}
 }

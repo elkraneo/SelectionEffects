@@ -122,9 +122,8 @@ extension SelectionEffectComponent {
 		/// visible behind other geometry.
 		public static var `default`: OutlineSelectionEffectStyle { OutlineSelectionEffectStyle() }
 
-		/// The outline color; `nil` uses the system accent color. Its alpha
-		/// controls the blend over the frame.
-		public var color: Color?
+		/// The outline color. Its alpha controls the blend over the frame.
+		public var color: Color
 
 		/// Thickness in pixels, clamped to `0...OutlineSelectionEffectStyle.maxWidth`.
 		public var width: Float
@@ -137,8 +136,21 @@ extension SelectionEffectComponent {
 		/// Largest supported width, in pixels.
 		public static let maxWidth: Float = Float(SelectionRenderer.maxWidth)
 
+		/// The system's dynamic accent color, resolved when drawn.
+		static var accentColor: Color {
+			#if canImport(UIKit)
+			.tintColor
+			#else
+			.controlAccentColor
+			#endif
+		}
+
+		/// - Parameters:
+		///   - color: The outline color; `nil` uses the system accent color.
+		///   - width: Thickness in pixels.
+		///   - occludedOpacity: Opacity of the parts hidden behind other geometry.
 		public init(color: Color? = nil, width: Float = 3, occludedOpacity: Float = 1) {
-			self.color = color
+			self.color = color ?? Self.accentColor
 			self.width = width
 			self.occludedOpacity = occludedOpacity
 		}
@@ -146,22 +158,27 @@ extension SelectionEffectComponent {
 
 	/// The look of a highlight selection effect.
 	public struct HighlightSelectionEffectStyle: Equatable {
-		/// The default highlight: the system accent color at 40% strength.
+		/// The default highlight: the system accent color at strength 1.
 		public static var `default`: HighlightSelectionEffectStyle { HighlightSelectionEffectStyle() }
 
-		/// The fill color; `nil` uses the system accent color.
-		public var color: Color?
+		/// The fill color. Its alpha scales the fill.
+		public var color: Color
 
-		/// How strongly the color covers the entity, from `0` to `1`. It
-		/// multiplies the color's alpha.
+		/// How strongly the color covers the entity. `1` is the standard look;
+		/// larger values are stronger, smaller ones subtler, as with
+		/// `HoverEffectComponent.HighlightHoverEffectStyle`.
 		public var strength: Float
 
 		/// Opacity of the parts hidden behind other geometry: `1` draws them like
 		/// the rest, `0` hides them (the default).
 		public var occludedOpacity: Float
 
-		public init(color: Color? = nil, strength: Float = 0.4, occludedOpacity: Float = 0) {
-			self.color = color
+		/// - Parameters:
+		///   - color: The fill color; `nil` uses the system accent color.
+		///   - strength: How strongly the color covers the entity; `1` is standard.
+		///   - occludedOpacity: Opacity of the parts hidden behind other geometry.
+		public init(color: Color? = nil, strength: Float = 1, occludedOpacity: Float = 0) {
+			self.color = color ?? OutlineSelectionEffectStyle.accentColor
 			self.strength = strength
 			self.occludedOpacity = occludedOpacity
 		}
@@ -259,20 +276,19 @@ extension SelectionEffectComponent {
 				kind: .highlight,
 				color: Self.srgb(style.color),
 				width: 0,
-				strength: style.strength,
+				// Strength 1 covers the entity at 40%; 2.5 covers it fully.
+				strength: style.strength * Self.highlightCoverage,
 				occludedOpacity: style.occludedOpacity
 			)
 		}
 	}
 
+	/// Fill coverage of a highlight at strength 1.
+	static let highlightCoverage: Float = 0.4
+
 	@MainActor
-	private static func srgb(_ color: Color?) -> SIMD4<Float> {
-		#if canImport(UIKit)
-		let resolved = color ?? .tintColor
-		#else
-		let resolved = color ?? .controlAccentColor
-		#endif
-		return SelectionRenderer.rgba(from: resolved.cgColor)
+	private static func srgb(_ color: Color) -> SIMD4<Float> {
+		SelectionRenderer.rgba(from: color.cgColor)
 	}
 }
 #endif

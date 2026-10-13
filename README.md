@@ -17,34 +17,52 @@ Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffect
 
 RealityKit has no post-processing on visionOS, so the outline and highlight aren't available there; `.shader` effects are. `.shader` needs iOS 18, macOS 15 or tvOS 26 (Shader Graph materials).
 
-## Select an entity
+## Overview
+
+Add a `SelectionEffectComponent` to an entity to show that it's selected; remove it to deselect. Unlike `HoverEffectComponent`, which reacts to the person's gaze or pointer, selection is your app's state, so the entity needs no `InputTargetComponent` or `CollisionComponent`.
 
 ```swift
-entity.components.set(SelectionEffectComponent())   // outline in the system accent color
+entity.components.set(SelectionEffectComponent())   // default: outline in the system accent color
 entity.components.remove(SelectionEffectComponent.self)
 ```
 
-Three effects, as with `HoverEffectComponent`'s spotlight, highlight and shader:
+### Hierarchical behavior
+
+The effect applies to the entity's entire hierarchy: its descendants are drawn with it. For USD stages where a parent prim carries an aggregate mesh, `meshSelection:` can draw only the nearest meshes (`.nearestMeshes`) or the descendants first (`.preferDescendants`).
+
+### Styles
+
+`.outline` draws a pixel-exact ring around the silhouette. `width` is in pixels; `occludedOpacity` sets how visible the hidden parts are behind other geometry (`1` X-ray, `0` hidden, `0.3` Reality Composer Pro's look).
 
 ```swift
-// Outline: color, width in pixels, and how visible it is behind other geometry
-// (1 = X-ray, 0 = hidden, 0.3 = Reality Composer Pro's look).
 SelectionEffectComponent(.outline(.init(color: .systemYellow, width: 3, occludedOpacity: 0.3)))
-
-// Highlight: a translucent fill over the entity.
-SelectionEffectComponent(.highlight(.init(color: .systemOrange, strength: 0.4)))
-
-// Shader: your own look, built in a Shader Graph material.
-SelectionEffectComponent(.shader(.init(fadeInDuration: 0.2, fadeOutDuration: 0.2)))
 ```
 
-### Your own look
+`.highlight` fills the silhouette with a translucent color. As with `HoverEffectComponent.HighlightHoverEffectStyle`, `strength` defaults to `1`; higher values are stronger.
 
-`.shader` works like `HoverEffectComponent`'s `.shader`. While the entity is selected, the float input `SelectionIntensity` of its Shader Graph materials fades from 0 to 1, and back to 0 after you remove the component. Add that input to your material in Reality Composer Pro and build any look from it: a glow, a tint, a pulse, a dissolve. [Docs/SelectionShaderTemplate.usda](Docs/SelectionShaderTemplate.usda) is a minimal material that blends gray to orange. Set `parameterName:` to use a different input name.
+```swift
+SelectionEffectComponent(.highlight(.init(color: .systemOrange, strength: 1.5)))
+```
 
-Unlike the outline and highlight, this effect writes to the entity's materials. Materials without the input are left unchanged.
+A `nil` color uses the system accent color. Each entity can have its own effect.
 
-A `nil` color uses the system accent color. Each entity can have its own effect. `meshSelection:` chooses which meshes in the entity's hierarchy are drawn: all of them (the default), the nearest ones, or descendants first (for USD prims that carry an aggregate mesh).
+### Shader inputs
+
+`.shader` is for your own look, like `HoverEffectComponent`'s `.shader`. While the entity is selected, the float input `SelectionIntensity` of its `ShaderGraphMaterial`s fades from 0 to 1, and back to 0 after you remove the component. Add that input to your material in Reality Composer Pro's Shader Graph and build any look from it.
+
+```swift
+let material = try await ShaderGraphMaterial(named: "/Root/SelectionMaterial", from: "Scene.usda", in: bundle)
+entity.model?.materials = [material]
+entity.components.set(SelectionEffectComponent(.shader(.init(fadeInDuration: 0.2, fadeOutDuration: 0.2))))
+```
+
+[Docs/SelectionShaderTemplate.usda](Docs/SelectionShaderTemplate.usda) is a minimal material that blends gray to orange. Set `parameterName:` to use a different input. Apple's `.shader` drives a built-in Hover State node; third-party code can't add Shader Graph nodes, so this effect writes the material input instead. Materials without the input are left unchanged.
+
+### Differences from HoverEffectComponent
+
+- No `spotlight`: it follows where the person looks, which has no meaning for selection.
+- No `GroupID`: your code decides what's selected, so you choose the group when you add the components.
+- No `OpacityFunction`: the outline and highlight are drawn after rendering and can't see material opacity, so on transparent materials they draw as if the material were opaque.
 
 ## Draw the effects
 
