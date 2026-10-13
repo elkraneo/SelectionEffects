@@ -68,7 +68,7 @@ entity.components.set(SelectionEffectComponent(.shader(.init(fadeInDuration: 0.2
 
 Install them once per view. On visionOS, `content.installSelectionEffects()` only starts the system that drives `.shader` effects.
 
-**RealityView**, in the make closure. The scene needs a camera entity with `PerspectiveCameraComponent`:
+**RealityView**, in the make closure. The scene needs a camera entity with `PerspectiveCameraComponent`; pass it as `camera:` if the scene can contain other cameras:
 
 ```swift
 RealityView { content in

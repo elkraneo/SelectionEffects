@@ -27,14 +27,17 @@ extension RealityViewCameraContent {
 	/// }
 	/// ```
 	///
-	/// The scene needs a camera entity with `PerspectiveCameraComponent`.
-	///
-	/// - Parameter frameHandler: Called on the render thread with each finished
+	/// - Parameters:
+	///   - camera: The entity whose `PerspectiveCameraComponent` renders the view.
+	///     If `nil`, the scene's first active perspective camera is used; pass it
+	///     when the scene can contain other cameras (loaded USD content, for example).
+	///   - frameHandler: Called on the render thread with each finished
 	///   frame. RealityView allows a single post-processing effect, and one
 	///   effect can't hand the frame to another, so this is where to capture the
 	///   frame or draw your own effect over it.
 	@MainActor
 	public mutating func installSelectionEffects(
+		camera: Entity? = nil,
 		frameHandler: (@Sendable (SelectionEffectsFrame) -> Void)? = nil
 	) {
 		let renderer = SelectionRenderer()
@@ -51,7 +54,11 @@ extension RealityViewCameraContent {
 		var content = self
 		let host = SelectionEffectsHost(
 			renderer: renderer,
-			viewMatrix: SelectionEffectsHost.sceneCameraViewMatrix,
+			viewMatrix: { [weak camera] scene in
+				guard let camera else { return SelectionEffectsHost.sceneCameraViewMatrix(scene) }
+				let noRef: Entity? = nil
+				return camera.transformMatrix(relativeTo: noRef).inverse
+			},
 			attach: { content.renderingEffects.customPostProcessing = .effect(effect) }
 		)
 		add(host.makeEntity())
