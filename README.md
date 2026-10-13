@@ -77,7 +77,7 @@ RealityView { content in
 }
 ```
 
-This sets the view's custom post-processing effect, replacing any other one. To capture the frame or add your own effect, pass a `frameHandler`: it runs on the render thread with each finished frame, after the selection effects are drawn.
+This sets the view's custom post-processing effect, replacing any other one. To capture the frame or add your own effect, pass a `frameHandler`: it runs on the render thread with each frame, after the selection effects are encoded. Encode your work into `frame.commandBuffer` before the handler returns, and don't keep the frame afterwards.
 
 ```swift
 content.installSelectionEffects(frameHandler: { frame in

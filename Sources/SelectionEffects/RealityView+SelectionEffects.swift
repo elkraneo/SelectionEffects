@@ -31,10 +31,11 @@ extension RealityViewCameraContent {
 	///   - camera: The entity whose `PerspectiveCameraComponent` renders the view.
 	///     If `nil`, the scene's first active perspective camera is used; pass it
 	///     when the scene can contain other cameras (loaded USD content, for example).
-	///   - frameHandler: Called on the render thread with each finished
-	///   frame. RealityView allows a single post-processing effect, and one
-	///   effect can't hand the frame to another, so this is where to capture the
-	///   frame or draw your own effect over it.
+	///   - frameHandler: Called on the render thread with each frame, after the
+	///     selection effects are encoded. RealityView allows a single
+	///     post-processing effect, and one effect can't hand the frame to
+	///     another, so this is where to capture the frame or draw your own effect
+	///     over it. See `SelectionEffectsFrame` for the frame's lifetime.
 	@MainActor
 	public mutating func installSelectionEffects(
 		camera: Entity? = nil,
@@ -98,16 +99,19 @@ struct SelectionOutlinePostProcess: PostProcessEffect {
 	}
 }
 
-/// A rendered frame with its selection effects drawn, handed to the
-/// `frameHandler` of `installSelectionEffects(frameHandler:)`.
+/// A frame whose selection effects have been encoded, handed to the
+/// `frameHandler` of `installSelectionEffects(camera:frameHandler:)`.
 ///
-/// The handler runs on RealityKit's render thread, once per frame, after the
-/// effects have been encoded. Encode your own work into `commandBuffer`: read
-/// `texture` (to capture the frame) or draw into it (to add your own effect).
-/// Don't keep the textures beyond the frame; copy what you need.
+/// The handler runs on RealityKit's render thread, once per frame, before the
+/// command buffer is committed; nothing has executed on the GPU yet. Encode
+/// your own work into `commandBuffer` **synchronously, before the handler
+/// returns**: read `texture` (blit it to your own texture to capture the
+/// frame; read the copy in a completed handler) or draw into it. Don't keep
+/// the frame, the command buffer or the textures after the handler returns:
+/// RealityKit commits the buffer and reuses the textures.
 @available(iOS 26.0, macOS 26.0, tvOS 26.0, *)
 @available(visionOS, unavailable)
-public struct SelectionEffectsFrame: @unchecked Sendable {
+public struct SelectionEffectsFrame {
 	public let device: any MTLDevice
 	public let commandBuffer: any MTLCommandBuffer
 	/// The view's output texture, with the selection effects drawn.
