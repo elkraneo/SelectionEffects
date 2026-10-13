@@ -148,7 +148,7 @@ public struct SelectionEffectSystem: System {
 			updatesSinceScan = 0
 			tracked.scan(context.scene)
 		}
-		let selected = tracked.merged(with: Array(context.scene.performQuery(Self.selected)))
+		let selected = tracked.merged(with: Array(context.scene.performQuery(Self.selected)), in: context.scene)
 		shaders.update(selected: selected, deltaTime: context.deltaTime)
 
 		#if !os(visionOS)
@@ -184,8 +184,8 @@ public struct SelectionEffectSystem: System {
 		}
 
 		/// `queried` plus tracked entities that still carry the component and
-		/// are in a scene, without duplicates.
-		func merged(with queried: [Entity]) -> [Entity] {
+		/// are in `scene`, without duplicates.
+		func merged(with queried: [Entity], in scene: RealityKit.Scene) -> [Entity] {
 			var result = queried
 			var seen = Set(queried.map(ObjectIdentifier.init))
 			for (id, weak) in entities {
@@ -193,7 +193,8 @@ public struct SelectionEffectSystem: System {
 					entities[id] = nil
 					continue
 				}
-				if entity.scene != nil, seen.insert(id).inserted { result.append(entity) }
+				// Another scene's system draws an entity that moved there.
+				if entity.scene === scene, seen.insert(id).inserted { result.append(entity) }
 			}
 			return result
 		}
