@@ -7,6 +7,7 @@
 
 #if !os(visionOS)
 
+import Foundation
 import Metal
 import RealityKit
 import simd
@@ -19,10 +20,20 @@ import simd
 
 /// CPU-side geometry for one mesh part, ready for GPU upload.
 struct OutlineMeshData: Sendable {
+	/// Unique per extraction: a changed id means changed geometry.
+	let id: UInt64 = OutlineMeshData.nextID()
 	let positions: [SIMD3<Float>]  // Metal float3, stride 16 — uploaded as is
 	let indices: [UInt8]
 	let indexCount: Int
 	let indexType: MTLIndexType
+
+	private final class Counter: @unchecked Sendable {
+		private let lock = NSLock()
+		private var value: UInt64 = 0
+		func next() -> UInt64 { lock.withLock { value += 1; return value } }
+	}
+	private static let counter = Counter()
+	private static func nextID() -> UInt64 { counter.next() }
 }
 
 /// One selected mesh: its geometry, the entity that owns it, and the
@@ -78,7 +89,6 @@ enum OutlineMeshExtraction {
 		mode: SelectionEffectComponent.MeshSelection,
 		cache: OutlineGeometryCache
 	) -> [OutlineSelectedMesh] {
-		cache.pruneReleasedEntities()
 		var meshes: [OutlineSelectedMesh] = []
 		collect(from: entity, mode: mode, cache: cache, into: &meshes)
 		return meshes
@@ -143,9 +153,11 @@ enum OutlineMeshExtraction {
 		}
 
 		// Fallback: LowLevelMesh (needed for procedurally generated meshes).
+		// Cached by the LowLevelMesh's identity: buffers updated in place aren't
+		// re-read until `reloadGeometry(of:)`.
 		if #available(iOS 18.0, macOS 15.0, *),
 			let low = model.mesh.lowLevelMesh,
-			let data = extractFromLowLevel(low)
+			let data = cache.lowLevelContents(of: low, owner: entity, extract: { extractFromLowLevel(low) })
 		{
 			meshes.append(
 				OutlineSelectedMesh(owner: entity, localTransform: matrix_identity_float4x4, data: data)
@@ -262,8 +274,9 @@ enum OutlineMeshExtraction {
 
 // MARK: - Geometry cache
 
-/// Extracted `MeshResource.Contents` geometry per entity, owned by one
-/// `SelectionRenderer` so it's released together with the renderer.
+/// Extracted geometry per entity, shared by all views. Entries of released
+/// entities are pruned every frame by `SelectionEffectSystem`;
+/// `SelectionEffectComponent.clearGeometryCache()` empties it.
 ///
 /// Reading MeshBuffer elements is slow (~100 ms for a 46k-vertex model, in
 /// Release too), so each entity's mesh is read once and reused on later
@@ -280,7 +293,7 @@ enum OutlineMeshExtraction {
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
 @available(visionOS, unavailable)
 final class OutlineGeometryCache: @unchecked Sendable {
-	/// The cache every renderer uses while `cachesGeometry` is on.
+	/// The cache all renderers and `preloadGeometry(of:)` share.
 	static let shared = OutlineGeometryCache()
 
 	typealias Geometry = [(data: OutlineMeshData, transform: simd_float4x4)]
@@ -293,6 +306,44 @@ final class OutlineGeometryCache: @unchecked Sendable {
 	}
 
 	private var entries: [ObjectIdentifier: Entry] = [:]
+
+	private struct LowLevelEntry {
+		weak var entity: Entity?
+		let mesh: AnyObject
+		let data: OutlineMeshData
+	}
+
+	private var lowLevelEntries: [ObjectIdentifier: LowLevelEntry] = [:]
+
+	@MainActor
+	func lowLevelContents(
+		of mesh: AnyObject,
+		owner entity: Entity,
+		extract: () -> OutlineMeshData?
+	) -> OutlineMeshData? {
+		let key = ObjectIdentifier(entity)
+		if let entry = lowLevelEntries[key], entry.entity === entity, entry.mesh === mesh {
+			return entry.data
+		}
+		guard let data = extract() else { return nil }
+		lowLevelEntries[key] = LowLevelEntry(entity: entity, mesh: mesh, data: data)
+		return data
+	}
+
+	/// Forgets the geometry of `entity` and its descendants, so it's read again.
+	@MainActor
+	func purge(_ entity: Entity) {
+		entries[ObjectIdentifier(entity)] = nil
+		lowLevelEntries[ObjectIdentifier(entity)] = nil
+		for child in entity.children { purge(child) }
+	}
+
+	/// Empties the cache.
+	@MainActor
+	func removeAll() {
+		entries.removeAll()
+		lowLevelEntries.removeAll()
+	}
 
 	@MainActor
 	func contents(
@@ -317,6 +368,7 @@ final class OutlineGeometryCache: @unchecked Sendable {
 	@MainActor
 	func pruneReleasedEntities() {
 		entries = entries.filter { $0.value.entity != nil }
+		lowLevelEntries = lowLevelEntries.filter { $0.value.entity != nil }
 	}
 }
 

@@ -5,7 +5,8 @@
 //   swift run PostProcessTimingRepro update    # set in update: → traps intermittently
 //   swift run PostProcessTimingRepro deferred  # set on the first SceneEvents.Update → works
 //
-// Prints "OK" and exits 0 when the app survives 3 seconds.
+// Prints "OK" and exits 0 when the app survives 3 seconds and the effect was
+// attached (exit 1 if it never was).
 
 import AppKit
 import Metal
@@ -23,6 +24,10 @@ struct PassThrough: PostProcessEffect {
 
 let mode = CommandLine.arguments.dropFirst().first ?? "make"
 
+/// Set once `customPostProcessing` has been assigned (main thread only).
+final class Flag: @unchecked Sendable { var value = false }
+let attachment = Flag()
+
 struct ReproView: View {
     @State private var subscription: EventSubscription?
 
@@ -37,6 +42,7 @@ struct ReproView: View {
             switch mode {
             case "make":
                 content.renderingEffects.customPostProcessing = .effect(PassThrough())
+                attachment.value = true
             case "deferred":
                 var later = content
                 var attached = false
@@ -44,6 +50,7 @@ struct ReproView: View {
                     guard !attached else { return }
                     attached = true
                     later.renderingEffects.customPostProcessing = .effect(PassThrough())
+                    attachment.value = true
                 }
             default:
                 break
@@ -51,11 +58,16 @@ struct ReproView: View {
         } update: { content in
             if mode == "update" {
                 content.renderingEffects.customPostProcessing = .effect(PassThrough())
+                attachment.value = true
             }
         }
         .frame(width: 640, height: 480)
         .task {
             try? await Task.sleep(for: .seconds(3))
+            guard attachment.value else {
+                print("NOT ATTACHED")
+                exit(1)
+            }
             print("OK")
             exit(0)
         }

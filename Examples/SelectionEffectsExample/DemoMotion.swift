@@ -6,6 +6,7 @@
 //
 
 import RealityKit
+import SelectionEffects
 import simd
 
 /// Spins an entity in place and, optionally, orbits it around the origin, so the
@@ -24,6 +25,9 @@ struct DemoMotionComponent: Component {
 }
 
 struct DemoMotionSystem: System {
+	// Move entities before the selection effects read their transforms.
+	static var dependencies: [SystemDependency] { [.before(SelectionEffectSystem.self)] }
+
 	private static let query = EntityQuery(where: .has(DemoMotionComponent.self))
 	private var elapsed: Float = 0
 

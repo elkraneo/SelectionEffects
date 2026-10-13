@@ -27,15 +27,9 @@ extension RealityViewCameraContent {
 	/// ```
 	///
 	/// The scene needs a camera entity with `PerspectiveCameraComponent`.
-	///
-	/// - Parameter cachesGeometry: Cache each entity's outline geometry (default).
-	///   Turn it off for content edited in place, such as a live USD stage: a mesh
-	///   changed with `MeshResource.replace(with:)` that keeps its bounds would
-	///   otherwise keep its old outline.
 	@MainActor
-	public mutating func installSelectionEffects(cachesGeometry: Bool = true) {
+	public mutating func installSelectionEffects() {
 		let renderer = SelectionRenderer()
-		renderer.cachesGeometry = cachesGeometry
 		let effect = SelectionOutlinePostProcess(renderer: renderer)
 		// Attach the effect on the first scene update, through a copy of the
 		// content, rather than here. On macOS 27, setting `customPostProcessing`

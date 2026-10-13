@@ -57,10 +57,64 @@ struct SelectionEffectTests {
 	@Test func meshSelectionChangeRereadsGeometry() {
 		let renderer = SelectionRenderer()
 		let a = box()
+		a.addChild(box())
 		renderer.setSelected([(a, red, .subtree)])
 		renderer.discardPendingUpload()
-		renderer.setSelected([(a, red, .nearestMeshes)])
+		renderer.setSelected([(a, red, .nearestMeshes)])   // drops the child's mesh
 		#expect(renderer.selectionState.awaitingUpload)
+	}
+
+	@Test func swappedMeshIsReuploadedWithoutReselecting() {
+		let renderer = SelectionRenderer()
+		let a = box()
+		renderer.setSelected([(a, red, .subtree)])
+		renderer.discardPendingUpload()
+		a.model?.mesh = .generateSphere(radius: 0.5)
+		renderer.setSelected([(a, red, .subtree)])
+		#expect(renderer.selectionState.awaitingUpload)
+	}
+
+	@Test func addedChildIsPickedUpWithoutReselecting() {
+		let renderer = SelectionRenderer()
+		let a = box()
+		renderer.setSelected([(a, red, .subtree)])
+		renderer.discardPendingUpload()
+		a.addChild(box())
+		renderer.setSelected([(a, red, .subtree)])
+		#expect(renderer.selectionState.awaitingUpload)
+	}
+
+	@Test func reloadGeometryForcesReupload() {
+		let renderer = SelectionRenderer()
+		let a = box()
+		renderer.setSelected([(a, red, .subtree)])
+		renderer.discardPendingUpload()
+		renderer.setSelected([(a, red, .subtree)])
+		#expect(!renderer.selectionState.awaitingUpload)
+		SelectionEffectComponent.reloadGeometry(of: [a])
+		renderer.setSelected([(a, red, .subtree)])
+		#expect(renderer.selectionState.awaitingUpload)
+	}
+
+	@Test func stylesBeyondTheLimitReuseTheLastSlot() {
+		let renderer = SelectionRenderer()
+		let items = (0...SelectionRenderer.maxStyles).map { i in
+			(entity: box() as Entity,
+			 style: RenderStyle(kind: .outline, color: [Float(i) / 255, 0, 0, 1], width: 1, strength: 1, occludedOpacity: 1),
+			 meshes: SelectionEffectComponent.MeshSelection.subtree)
+		}
+		renderer.setSelected(items)
+		let state = renderer.selectionState
+		#expect(state.styles.count == SelectionRenderer.maxStyles)
+		#expect(state.meshStyles.max() == UInt32(SelectionRenderer.maxStyles))
+	}
+
+	@Test func nonFiniteAndOutOfRangeWidthsAreSanitized() {
+		#expect(SelectionEffectComponent.pixelWidth(.infinity) == 0)
+		#expect(SelectionEffectComponent.pixelWidth(.nan) == 0)
+		#expect(SelectionEffectComponent.pixelWidth(-3) == 0)
+		#expect(SelectionEffectComponent.pixelWidth(.greatestFiniteMagnitude) == SelectionRenderer.maxWidth)
+		#expect(SelectionEffectComponent.pixelWidth(2.6) == 3)
 	}
 
 	@Test func gpuStylesAreIndexedLinearAndClamped() {

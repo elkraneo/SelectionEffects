@@ -1,0 +1,31 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "Root"
+{
+    def Material "OtherMat"
+    {
+        float inputs:Glow = 0
+        token outputs:mtlx:surface.connect = </Root/OtherMat/PreviewSurface.outputs:out>
+
+        def Shader "PreviewSurface"
+        {
+            uniform token info:id = "ND_UsdPreviewSurface_surfaceshader"
+            color3f inputs:diffuseColor.connect = </Root/OtherMat/Mix.outputs:out>
+            token outputs:out
+        }
+
+        def Shader "Mix"
+        {
+            uniform token info:id = "ND_mix_color3"
+            color3f inputs:bg = (0.4, 0.4, 0.4)
+            color3f inputs:fg = (1, 0.45, 0)
+            float inputs:mix.connect = </Root/OtherMat.inputs:Glow>
+            color3f outputs:out
+        }
+    }
+}

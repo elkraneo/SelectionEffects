@@ -21,15 +21,11 @@ extension ARView {
 	/// when the effects start (on the next frame) are kept and run first; set
 	/// callbacks after that and they replace the effects. The view's camera is
 	/// read every frame, so no camera entity is needed.
-	///
-	/// - Parameter cachesGeometry: Cache each entity's outline geometry (default).
-	///   Turn it off for content edited in place.
 	@MainActor
-	public func installSelectionEffects(cachesGeometry: Bool = true) {
+	public func installSelectionEffects() {
 		removeSelectionEffects()
 
 		let renderer = SelectionRenderer()
-		renderer.cachesGeometry = cachesGeometry
 		let installation = SelectionEffectsInstallation()
 		let host = SelectionEffectsHost(
 			renderer: renderer,
@@ -64,6 +60,7 @@ extension ARView {
 			renderCallbacks = installation.previousCallbacks
 		}
 		SelectionEffectsInstallation.set(nil, on: self)
+		OutlineGeometryCache.shared.pruneReleasedEntities()
 	}
 }
 

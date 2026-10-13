@@ -98,10 +98,21 @@ struct SelectionEffectsHostComponent: Component {
 
 // MARK: - System
 
-/// Every frame: fades `.shader` effects, and hands each view's renderer its
-/// camera and the selected entities with their current transforms.
+/// The system that draws selection effects. Every frame it fades `.shader`
+/// effects and hands each view's renderer its camera and the selected entities
+/// with their current transforms.
+///
+/// Registered by `installSelectionEffects()`. If your own systems move selected
+/// entities, run them first so outlines line up with the rendered frame:
+///
+/// ```swift
+/// struct MotionSystem: System {
+///     static var dependencies: [SystemDependency] { [.before(SelectionEffectSystem.self)] }
+///     …
+/// }
+/// ```
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, visionOS 1.0, *)
-struct SelectionEffectSystem: System {
+public struct SelectionEffectSystem: System {
 	private static let selected = EntityQuery(where: .has(SelectionEffectComponent.self))
 	#if !os(visionOS)
 	private static let hosts = EntityQuery(where: .has(SelectionEffectsHostComponent.self))
@@ -109,13 +120,14 @@ struct SelectionEffectSystem: System {
 
 	private var shaders = ShaderSelectionDriver()
 
-	init(scene: RealityKit.Scene) {}
+	public init(scene: RealityKit.Scene) {}
 
-	mutating func update(context: SceneUpdateContext) {
+	public mutating func update(context: SceneUpdateContext) {
 		let selected = Array(context.scene.performQuery(Self.selected))
 		shaders.update(selected: selected, deltaTime: context.deltaTime)
 
 		#if !os(visionOS)
+		OutlineGeometryCache.shared.pruneReleasedEntities()
 		for entity in context.scene.performQuery(Self.hosts) {
 			entity.components[SelectionEffectsHostComponent.self]?.host.update(
 				scene: context.scene,

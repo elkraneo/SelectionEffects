@@ -87,17 +87,13 @@ final class SelectionRenderer: @unchecked Sendable {
 		var meshStyles: [UInt32] = []
 		// Styles by index − 1.
 		var styles: [RenderStyle] = []
-		// What the current selection was built from; an unchanged key with new
-		// styles only restyles, without re-reading geometry.
-		var selectionKey: [SelectionKey] = []
-		// Index into the selected items of each selected mesh.
-		var meshItems: [Int] = []
+		// What the current upload was built from (see `GeometryKey`).
+		var geometryKey: [GeometryKey] = []
 		// Geometry of a new selection waiting for upload, consumed in encode.
 		var pendingUpload: [OutlineMeshData]? = nil
 		// One entry per selected mesh; nil = skip this frame (owner gone / disabled).
 		var modelMatrices: [simd_float4x4?] = []
 		var viewMatrix: simd_float4x4 = matrix_identity_float4x4
-		var cachesGeometry = true
 	}
 
 	private let lock = NSLock()
@@ -126,6 +122,7 @@ final class SelectionRenderer: @unchecked Sendable {
 		// Depth tests among the selected meshes, for standard and reversed Z.
 		var maskDepthLess: (any MTLDepthStencilState)?
 		var maskDepthGreater: (any MTLDepthStencilState)?
+		var loggedUnreadableDepth = false
 		var dilatePipeline: (any MTLComputePipelineState)?
 		var compositePipeline: (any MTLComputePipelineState)?
 
@@ -159,7 +156,7 @@ final class SelectionRenderer: @unchecked Sendable {
 
 	/// Largest supported width in pixels. The dilate pass scans a (2w+1)²
 	/// neighborhood per pixel, so larger values would stall the GPU.
-	static let maxWidth = 64
+	static let maxWidth = 32
 
 	static func clampWidth(_ width: Int) -> Int {
 		min(max(width, 0), maxWidth)
@@ -167,61 +164,63 @@ final class SelectionRenderer: @unchecked Sendable {
 
 	// MARK: - Selection
 
-	/// Whether extracted mesh geometry is cached per entity (default `true`).
-	/// See `installSelectionEffects(cachesGeometry:)`.
-	var cachesGeometry: Bool {
-		get { lock.withLock { shared.cachesGeometry } }
-		set { lock.withLock { shared.cachesGeometry = newValue } }
+	/// What the current upload was built from: each mesh's owner and geometry.
+	/// An unchanged key means only styles and transforms need updating.
+	struct GeometryKey: Equatable {
+		let owner: ObjectIdentifier?
+		let geometry: UInt64
 	}
 
-	/// Identifies what a selection was built from.
-	struct SelectionKey: Equatable {
-		let entity: ObjectIdentifier
-		let meshes: SelectionEffectComponent.MeshSelection
-	}
-
-	/// Draws each entity with its style. Re-reads geometry only when the entities
-	/// or their mesh selection change; a style-only change just restyles.
+	/// Draws each entity with its style. Called every frame: the meshes are
+	/// collected from the geometry cache each time (cheap after the first read),
+	/// so mesh swaps and hierarchy changes are picked up; geometry is uploaded
+	/// to the GPU only when it changes.
 	@MainActor
 	func setSelected(
 		_ items: [(entity: Entity, style: RenderStyle, meshes: SelectionEffectComponent.MeshSelection)]
 	) {
 		// Deduplicate styles; the mask holds at most `maxStyles` of them.
 		var styles: [RenderStyle] = []
+		var overflowed = false
 		let itemStyles: [UInt32] = items.map { item in
 			if let i = styles.firstIndex(of: item.style) { return UInt32(i + 1) }
-			guard styles.count < Self.maxStyles else { return UInt32(styles.count) }
+			guard styles.count < Self.maxStyles else {
+				overflowed = true
+				return UInt32(styles.count)
+			}
 			styles.append(item.style)
 			return UInt32(styles.count)
 		}
-		let key = items.map { SelectionKey(entity: ObjectIdentifier($0.entity), meshes: $0.meshes) }
+		if overflowed { warnAboutStyleOverflow() }
 
-		let restyleOnly = lock.withLock { () -> Bool in
-			guard key == shared.selectionKey else { return false }
-			shared.styles = styles
-			shared.meshStyles = shared.meshItems.map { itemStyles[$0] }
-			return true
-		}
-		if restyleOnly { return }
-
-		let cache = cachesGeometry ? geometryCache : OutlineGeometryCache()
 		var meshes: [OutlineSelectedMesh] = []
 		var meshItems: [Int] = []
 		for (index, item) in items.enumerated() {
-			let collected = OutlineMeshExtraction.collect(from: item.entity, mode: item.meshes, cache: cache)
+			let collected = OutlineMeshExtraction.collect(from: item.entity, mode: item.meshes, cache: geometryCache)
 			meshes += collected
 			meshItems += Array(repeating: index, count: collected.count)
 		}
-		let matrices = meshes.map(\.selectionModelMatrix)
+		let key = meshes.map { GeometryKey(owner: $0.owner.map(ObjectIdentifier.init), geometry: $0.data.id) }
+		let meshStyles = meshItems.map { itemStyles[$0] }
+
 		lock.withLock {
-			shared.selection = meshes
-			shared.meshItems = meshItems
-			shared.meshStyles = meshItems.map { itemStyles[$0] }
 			shared.styles = styles
-			shared.selectionKey = key
+			shared.meshStyles = meshStyles
+			guard key != shared.geometryKey else { return }
+			shared.selection = meshes
+			shared.geometryKey = key
 			shared.pendingUpload = meshes.map(\.data)
-			shared.modelMatrices = matrices
+			shared.modelMatrices = meshes.map(\.selectionModelMatrix)
 		}
+	}
+
+	private var warnedAboutStyleOverflow = false
+
+	@MainActor
+	private func warnAboutStyleOverflow() {
+		guard !warnedAboutStyleOverflow else { return }
+		warnedAboutStyleOverflow = true
+		Self.logger.warning("More than \(Self.maxStyles) distinct selection styles are in use; the extra ones are drawn with style \(Self.maxStyles).")
 	}
 
 	/// The selection as the render thread will see it (for tests).
@@ -438,7 +437,7 @@ final class SelectionRenderer: @unchecked Sendable {
 
 		// Depth convention of this projection: RealityKit may use reversed Z.
 		let reversedZ = Self.isReversedZ(projection)
-		let sceneDepth = Self.readableDepth(sourceDepth)
+		let sceneDepth = readableDepth(sourceDepth)
 		var depthParams = DepthParams(
 			useSceneDepth: sceneDepth == nil ? 0 : 1,
 			reversedZ: reversedZ ? 1 : 0,
@@ -559,20 +558,19 @@ final class SelectionRenderer: @unchecked Sendable {
 
 	/// The scene depth texture if the shaders can read it directly (a plain 2D
 	/// 32-bit float depth texture); otherwise nil, and occlusion is ignored.
-	private static func readableDepth(_ texture: (any MTLTexture)?) -> (any MTLTexture)? {
+	// Requires renderLock.
+	private func readableDepth(_ texture: (any MTLTexture)?) -> (any MTLTexture)? {
 		guard let texture, texture.textureType == .type2D,
 			texture.pixelFormat == .depth32Float || texture.pixelFormat == .depth32Float_stencil8
 		else {
-			if let texture, !loggedUnreadableDepth {
-				loggedUnreadableDepth = true
-				logger.notice("Scene depth (\(texture.pixelFormat.rawValue), type \(texture.textureType.rawValue)) can't be read; occludedOpacity is ignored.")
+			if let texture, !render.loggedUnreadableDepth {
+				render.loggedUnreadableDepth = true
+				Self.logger.notice("Scene depth (\(texture.pixelFormat.rawValue), type \(texture.textureType.rawValue)) can't be read; occludedOpacity is ignored.")
 			}
 			return nil
 		}
 		return texture
 	}
-
-	private nonisolated(unsafe) static var loggedUnreadableDepth = false
 
 	private static func makeGPUMesh(_ data: OutlineMeshData, device: any MTLDevice) -> GPUMesh? {
 		guard

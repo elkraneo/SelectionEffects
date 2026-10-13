@@ -249,6 +249,23 @@ extension SelectionEffectComponent {
 			_ = OutlineMeshExtraction.collect(from: entity, mode: meshSelection, cache: .shared)
 		}
 	}
+
+	/// Reads the geometry of `entities` and their descendants again on the next
+	/// frame. Mesh swaps and hierarchy changes are picked up automatically; call
+	/// this after editing a mesh in place (e.g. `MeshResource.replace(with:)`
+	/// or a `LowLevelMesh` buffer update), which isn't detected.
+	@MainActor
+	public static func reloadGeometry(of entities: [Entity]) {
+		entities.forEach(OutlineGeometryCache.shared.purge)
+	}
+
+	/// Releases all cached geometry. Geometry of released entities is dropped
+	/// automatically while any view draws selection effects; call this to free
+	/// memory after closing the last one.
+	@MainActor
+	public static func clearGeometryCache() {
+		OutlineGeometryCache.shared.removeAll()
+	}
 }
 
 // MARK: - Resolving for the renderer
@@ -267,7 +284,7 @@ extension SelectionEffectComponent {
 			return RenderStyle(
 				kind: .outline,
 				color: Self.srgb(style.color),
-				width: Int(style.width.rounded()),
+				width: Self.pixelWidth(style.width),
 				strength: 1,
 				occludedOpacity: style.occludedOpacity
 			)
@@ -281,6 +298,12 @@ extension SelectionEffectComponent {
 				occludedOpacity: style.occludedOpacity
 			)
 		}
+	}
+
+	/// `width` rounded and clamped to `0...maxWidth`; non-finite values become 0.
+	static func pixelWidth(_ width: Float) -> Int {
+		guard width.isFinite else { return 0 }
+		return Int(min(max(width, 0), OutlineSelectionEffectStyle.maxWidth).rounded())
 	}
 
 	/// Fill coverage of a highlight at strength 1.

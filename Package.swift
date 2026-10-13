@@ -30,7 +30,8 @@ let package = Package(
 		),
 		.testTarget(
 			name: "SelectionEffectsTests",
-			dependencies: ["SelectionEffects"]
+			dependencies: ["SelectionEffects"],
+			resources: [.copy("Resources")]
 		),
 	]
 )
