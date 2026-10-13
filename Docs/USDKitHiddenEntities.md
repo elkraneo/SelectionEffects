@@ -1,6 +1,6 @@
 # USDKit's generated entities are invisible to entity queries
 
-**Status:** Observed on macOS 27.0.1. Reported to Apple as **FB25173225** (2026-10-13).
+**Status:** Observed on macOS 27.0.1. Reported to Apple as **FB25173225** (2026-10-13; [public copy](https://gist.github.com/elkraneo/677c205f204d2af315a046ae06d499e7)).
 **Workaround in this package:** `SelectionEffectSystem` walks the subtrees of `USDStageComponent` entities every few updates (`Sources/SelectionEffects/QueryHiddenEntities.swift`). Apps can do the same with `Entity.descendants(where:)`.
 
 ## Summary
