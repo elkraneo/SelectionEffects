@@ -144,6 +144,7 @@ enum OutlineMeshExtraction {
 			extractFromContents($0.contents)
 		}
 		if !fromContents.isEmpty {
+			cache.forgetLowLevel(entity)
 			meshes.append(
 				contentsOf: fromContents.map {
 					OutlineSelectedMesh(owner: entity, localTransform: $0.transform, data: $0.data)
@@ -306,11 +307,13 @@ final class OutlineGeometryCache: @unchecked Sendable {
 	}
 
 	private var entries: [ObjectIdentifier: Entry] = [:]
+	private var lastPrune = Date.distantPast
 
 	private struct LowLevelEntry {
 		weak var entity: Entity?
 		let mesh: AnyObject
-		let data: OutlineMeshData
+		/// `nil` when extraction failed, so it isn't retried every frame.
+		let data: OutlineMeshData?
 	}
 
 	private var lowLevelEntries: [ObjectIdentifier: LowLevelEntry] = [:]
@@ -325,9 +328,15 @@ final class OutlineGeometryCache: @unchecked Sendable {
 		if let entry = lowLevelEntries[key], entry.entity === entity, entry.mesh === mesh {
 			return entry.data
 		}
-		guard let data = extract() else { return nil }
+		let data = extract()
 		lowLevelEntries[key] = LowLevelEntry(entity: entity, mesh: mesh, data: data)
 		return data
+	}
+
+	/// Drops `entity`'s LowLevelMesh entry, once its mesh is read another way.
+	@MainActor
+	func forgetLowLevel(_ entity: Entity) {
+		lowLevelEntries[ObjectIdentifier(entity)] = nil
 	}
 
 	/// Forgets the geometry of `entity` and its descendants, so it's read again.
@@ -366,7 +375,12 @@ final class OutlineGeometryCache: @unchecked Sendable {
 
 	/// Drops entries whose entity has been released.
 	@MainActor
-	func pruneReleasedEntities() {
+	func pruneReleasedEntities(force: Bool = false) {
+		// At most once a second: it scans every entry, and runs from every
+		// view's system update.
+		let now = Date()
+		guard force || now.timeIntervalSince(lastPrune) >= 1 else { return }
+		lastPrune = now
 		entries = entries.filter { $0.value.entity != nil }
 		lowLevelEntries = lowLevelEntries.filter { $0.value.entity != nil }
 	}

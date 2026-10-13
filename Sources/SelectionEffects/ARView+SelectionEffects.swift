@@ -60,7 +60,7 @@ extension ARView {
 			renderCallbacks = installation.previousCallbacks
 		}
 		SelectionEffectsInstallation.set(nil, on: self)
-		OutlineGeometryCache.shared.pruneReleasedEntities()
+		OutlineGeometryCache.shared.pruneReleasedEntities(force: true)
 	}
 }
 

@@ -104,6 +104,7 @@ Render callbacks you've already set are kept and run before the effects.
 - All selections share one silhouette mask. Where a selected entity is in front of another selected one, the rear entity's ring isn't drawn inside the front one's silhouette, even with `occludedOpacity: 1`.
 - At most 127 distinct styles can be drawn at once; extra styles reuse the 127th (a warning is logged).
 - Outline cost grows with the square of the width: each frame scans a (2w+1)² neighborhood per pixel. Widths are capped at 32 pixels.
+- Every frame, the system walks each selected entity's hierarchy (to pick up mesh, material and hierarchy changes). Very large or deeply nested selections cost main-thread time in proportion.
 - `.shader` effects are driven in every scene once the system is registered, like hover effects; `removeSelectionEffects()` stops only the post-process. Remove the component to stop a shader effect.
 
 How the API relates to hover effects, Hydra and Reality Composer Pro: [Docs/Precedents.md](Docs/Precedents.md). The outline technique is explained in [RealityKit Outline Selection](https://elkraneo.com/realitykit-outline-selection/). It began as [PostProcessOutline](https://github.com/elkraneo/PostProcessOutline), which remains available as a standalone renderer.
