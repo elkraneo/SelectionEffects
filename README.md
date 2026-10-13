@@ -106,7 +106,7 @@ Render callbacks you've already set are kept and run before the effects.
 
 ### Known limitations
 
-- RealityKit's entity queries don't return the meshes USDKit's `USDStageComponent` generates (on macOS 27, USDKit marks them hidden through SPI). The system finds selected ones by walking the subtrees of `USDStageComponent` entities every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate. To find those entities in your own code, use `entity.descendants(where:)` on the stage entity.
+- RealityKit's entity queries don't return the meshes USDKit's `USDStageComponent` generates (on macOS 27, USDKit marks them hidden through SPI). The system finds selected ones by walking the subtrees of `USDStageComponent` entities every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate. To find those entities in your own code, use `entity.descendants(where:)` on the stage entity. Details and a standalone reproduction: [Docs/USDKitHiddenEntities.md](Docs/USDKitHiddenEntities.md).
 - A USDKit-generated entity that your code moves out of its stage before the next scan isn't found. (Removing `USDStageComponent` removes the generated entities, so this only happens when you reparent them yourself.)
 - Instanced meshes (`MeshInstancesComponent`) are outlined once, at the entity's transform, not at each instance.
 - Skinned and blend-shape meshes are outlined in their rest pose: the outline doesn't follow skeletal or vertex deformation.
