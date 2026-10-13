@@ -140,11 +140,9 @@ public struct SelectionEffectSystem: System {
 	}
 
 	public mutating func update(context: SceneUpdateContext) {
-		// Entity queries don't return every entity: on macOS 27 the meshes that
-		// USDKit's USDStageComponent generates are missing from performQuery (even
-		// for ModelComponent) and send no component events, though they're in the
-		// scene and reachable through `children`. So every few updates, walk the
-		// hierarchy below the queried entities for owners the query missed.
+		// Entity queries skip the meshes USDKit's USDStageComponent generates, and
+		// those send no component events (see QueryHiddenEntities.swift). So every
+		// few updates, walk the stage subtrees for owners the query missed.
 		updatesSinceScan += 1
 		if updatesSinceScan >= Self.scanInterval {
 			updatesSinceScan = 0
@@ -175,23 +173,14 @@ public struct SelectionEffectSystem: System {
 		func insert(_ entity: Entity) { entities[ObjectIdentifier(entity)] = WeakEntity(entity: entity) }
 		func remove(_ entity: Entity) { entities[ObjectIdentifier(entity)] = nil }
 
-		/// Walks the hierarchy from the scene's root entities and tracks every
-		/// owner of the component, including entities queries don't return.
+		/// Tracks the owners of the component that entity queries don't return:
+		/// those inside USDKit stages. Walks only the stage subtrees.
 		func scan(_ scene: RealityKit.Scene) {
-			// The topmost ancestors of the indexed entities: a root itself may not
-			// be indexed (RealityView's content root isn't, on macOS 27).
-			var roots: [ObjectIdentifier: Entity] = [:]
-			for entity in scene.performQuery(EntityQuery()) {
-				var top = entity
-				while let parent = top.parent { top = parent }
-				roots[ObjectIdentifier(top)] = top
+			for stage in QueryHiddenContent.roots(in: scene) {
+				for owner in stage.descendants(where: { $0.components.has(SelectionEffectComponent.self) }) {
+					insert(owner)
+				}
 			}
-			for root in roots.values { visit(root) }
-		}
-
-		private func visit(_ entity: Entity) {
-			if entity.components.has(SelectionEffectComponent.self) { insert(entity) }
-			for child in entity.children { visit(child) }
 		}
 
 		/// `queried` plus tracked entities that still carry the component and

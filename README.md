@@ -106,8 +106,7 @@ Render callbacks you've already set are kept and run before the effects.
 
 ### Known limitations
 
-- Entities that RealityKit's entity queries don't return (on macOS 27, the meshes USDKit's `USDStageComponent` generates) are found by a hierarchy scan every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate.
-
+- RealityKit's entity queries don't return the meshes USDKit's `USDStageComponent` generates (on macOS 27, USDKit marks them hidden through SPI). The system finds selected ones by walking the subtrees of `USDStageComponent` entities every few frames, so their selection can appear up to ~100 ms late. Deselecting is immediate. To find those entities in your own code, use `entity.descendants(where:)` on the stage entity.
 - Skinned and blend-shape meshes are outlined in their rest pose: the outline doesn't follow skeletal or vertex deformation.
 - All selections share one silhouette mask. Where a selected entity is in front of another selected one, the rear entity's ring isn't drawn inside the front one's silhouette, even with `occludedOpacity: 1`.
 - At most 127 distinct styles can be drawn at once; extra styles reuse the 127th (a warning is logged).

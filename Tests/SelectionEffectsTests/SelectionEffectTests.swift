@@ -22,6 +22,14 @@ struct SelectionEffectTests {
 	private let red = RenderStyle(kind: .outline, color: [1, 0, 0, 1], width: 2, strength: 1, occludedOpacity: 1)
 	private let blue = RenderStyle(kind: .outline, color: [0, 0, 1, 1], width: 5, strength: 1, occludedOpacity: 0.3)
 
+	@Test func descendantsWalkDepthFirstWithoutTheRoot() {
+		let root = Entity(), a = box(), a1 = box(), b = Entity(), b1 = box()
+		root.addChild(a); a.addChild(a1); root.addChild(b); b.addChild(b1)
+		root.components.set(ModelComponent(mesh: .generateBox(size: 1), materials: []))
+		let found = root.descendants { $0.components.has(ModelComponent.self) }
+		#expect(found.map(ObjectIdentifier.init) == [a, a1, b1].map(ObjectIdentifier.init))
+	}
+
 	@Test func identicalStylesShareOneIndex() {
 		let renderer = SelectionRenderer()
 		let (a, b, c) = (box(), box(), box())
