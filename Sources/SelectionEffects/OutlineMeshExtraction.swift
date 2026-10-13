@@ -5,6 +5,8 @@
 //  Created by Cristian Díaz on 29.03.26.
 //
 
+#if !os(visionOS)
+
 import Metal
 import RealityKit
 import simd
@@ -317,3 +319,5 @@ final class OutlineGeometryCache: @unchecked Sendable {
 		entries = entries.filter { $0.value.entity != nil }
 	}
 }
+
+#endif

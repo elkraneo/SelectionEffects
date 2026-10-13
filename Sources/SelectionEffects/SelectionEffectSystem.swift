@@ -9,6 +9,7 @@ import RealityKit
 import os
 import simd
 
+#if !os(visionOS)
 // MARK: - Host
 
 /// The per-view side of the selection effects: the renderer that draws them, how
@@ -65,8 +66,11 @@ final class SelectionEffectsHost {
 		// Sorted, so the selection only counts as changed when its members change.
 		let items = selected
 			.compactMap { entity -> (entity: Entity, style: RenderStyle, meshes: SelectionEffectComponent.MeshSelection)? in
-				guard let component = entity.components[SelectionEffectComponent.self] else { return nil }
-				return (entity, component.renderStyle, component.meshSelection)
+				guard
+					let component = entity.components[SelectionEffectComponent.self],
+					let style = component.renderStyle
+				else { return nil }
+				return (entity, style, component.meshSelection)
 			}
 			.sorted { ObjectIdentifier($0.entity) < ObjectIdentifier($1.entity) }
 		renderer.setSelected(items)
@@ -90,28 +94,35 @@ struct SelectionEffectsHostComponent: Component {
 	let host: SelectionEffectsHost
 }
 
+#endif
+
 // MARK: - System
 
-/// Every frame, hands each view's renderer its camera and the entities that
-/// carry a `SelectionEffectComponent`, with their current transforms.
-@available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
-@available(visionOS, unavailable)
+/// Every frame: fades `.shader` effects, and hands each view's renderer its
+/// camera and the selected entities with their current transforms.
+@available(iOS 15.0, macOS 12.0, tvOS 26.0, visionOS 1.0, *)
 struct SelectionEffectSystem: System {
-	private static let hosts = EntityQuery(where: .has(SelectionEffectsHostComponent.self))
 	private static let selected = EntityQuery(where: .has(SelectionEffectComponent.self))
+	#if !os(visionOS)
+	private static let hosts = EntityQuery(where: .has(SelectionEffectsHostComponent.self))
+	#endif
+
+	private var shaders = ShaderSelectionDriver()
 
 	init(scene: RealityKit.Scene) {}
 
-	func update(context: SceneUpdateContext) {
-		let hosts = context.scene.performQuery(Self.hosts)
-		guard hosts.contains(where: { _ in true }) else { return }
+	mutating func update(context: SceneUpdateContext) {
 		let selected = Array(context.scene.performQuery(Self.selected))
-		for entity in hosts {
+		shaders.update(selected: selected, deltaTime: context.deltaTime)
+
+		#if !os(visionOS)
+		for entity in context.scene.performQuery(Self.hosts) {
 			entity.components[SelectionEffectsHostComponent.self]?.host.update(
 				scene: context.scene,
 				selected: selected
 			)
 		}
+		#endif
 	}
 
 	@MainActor private static var registered = false
@@ -121,7 +132,9 @@ struct SelectionEffectSystem: System {
 		guard !registered else { return }
 		registered = true
 		SelectionEffectComponent.registerComponent()
+		#if !os(visionOS)
 		SelectionEffectsHostComponent.registerComponent()
+		#endif
 		registerSystem()
 	}
 }

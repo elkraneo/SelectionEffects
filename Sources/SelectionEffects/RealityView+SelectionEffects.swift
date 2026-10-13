@@ -5,6 +5,8 @@
 //  Created by Cristian Díaz on 13.10.26.
 //
 
+#if !os(visionOS)
+
 import Metal
 import RealityKit
 import SwiftUI
@@ -75,3 +77,5 @@ struct SelectionOutlinePostProcess: PostProcessEffect {
 		)
 	}
 }
+
+#endif

@@ -5,6 +5,8 @@
 //  Created by Cristian Díaz on 29.03.26.
 //
 
+#if !os(visionOS)
+
 import CoreGraphics
 import Foundation
 import Metal
@@ -744,3 +746,5 @@ final class SelectionRenderer: @unchecked Sendable {
 		return SIMD4(Float(c[0]), Float(c[1]), Float(c[2]), Float(c[3]))
 	}
 }
+
+#endif

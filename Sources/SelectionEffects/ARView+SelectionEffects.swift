@@ -5,6 +5,8 @@
 //  Created by Cristian Díaz on 13.10.26.
 //
 
+#if !os(visionOS)
+
 import Foundation
 import Metal
 import ObjectiveC
@@ -162,3 +164,5 @@ private final class ChainedPostProcess: @unchecked Sendable {
 		}
 	}
 }
+
+#endif

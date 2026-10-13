@@ -10,6 +10,8 @@ let package = Package(
 		.macOS(.v12),
 		// RealityKit's ARView / ModelComponent APIs exist on tvOS from 26.
 		.tvOS("26.0"),
+		// visionOS: `.shader` effects only (no post-processing there).
+		.visionOS(.v1),
 	],
 	products: [
 		.library(

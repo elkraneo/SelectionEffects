@@ -12,9 +12,11 @@ This component is the model for SelectionEffects. It holds one `HoverEffect`, bu
 | `var hoverEffect: HoverEffect` | `var selectionEffect: SelectionEffect` |
 | `.highlight(HighlightHoverEffectStyle)` | `.highlight(HighlightSelectionEffectStyle)` |
 | `.spotlight(SpotlightHoverEffectStyle)` | none: a spotlight follows where the user looks, which has no meaning for selection |
-| `.shader(ShaderHoverEffectInputs)` | planned |
+| `.shader(ShaderHoverEffectInputs)`: `fadeInDuration`, `fadeOutDuration` | `.shader(ShaderSelectionEffectInputs)`: the same two, plus `parameterName` |
 | — | `.outline(OutlineSelectionEffectStyle)` |
 | styles: `static let default`, `init(color: NSColor? = nil, strength: Float = 1)` | styles: `static var default`, `init(color: Color? = nil, …)` with the platform color |
+
+Both `.shader` effects are the extension point: the developer builds the look in a Shader Graph material. Apple feeds hover into a built-in Shader Graph node, `ND_realitykit_hover_state` (static: defined in Reality Composer Pro 3.0's ShaderGraph MaterialX node definitions). Third-party code can't add Shader Graph nodes, so SelectionEffects writes a float material input instead, via `ShaderGraphMaterial.setParameter(name:value:)`.
 
 Hover and selection differ in who decides. Hover is input state owned by the system; on visionOS the system draws hover effects without telling the app where the user is looking, so apps can't build them themselves. Selection is app state, so the app decides what's selected and when.
 

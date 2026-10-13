@@ -97,8 +97,8 @@ struct SelectionEffectTests {
 		#expect(highlight.color == nil && highlight.occludedOpacity == 0)
 	}
 
-	@Test func renderStyleResolvesNilColorToAccent() {
-		let style = SelectionEffectComponent(.highlight(.init(strength: 0.5))).renderStyle
+	@Test func renderStyleResolvesNilColorToAccent() throws {
+		let style = try #require(SelectionEffectComponent(.highlight(.init(strength: 0.5))).renderStyle)
 		#expect(style.kind == .highlight)
 		#expect(style.width == 0)
 		#expect(style.strength == 0.5)

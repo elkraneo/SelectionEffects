@@ -5,6 +5,7 @@
 //  Created by Cristian Díaz on 13.10.26.
 //
 
+import Foundation
 import RealityKit
 
 #if canImport(UIKit)
@@ -29,19 +30,22 @@ import AppKit
 ///
 /// Its shape follows RealityKit's `HoverEffectComponent`: the component holds an
 /// effect, built from a style, and the effect is drawn while the component is present.
-@available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
-@available(visionOS, unavailable)
+@available(iOS 15.0, macOS 12.0, tvOS 26.0, visionOS 1.0, *)
 public struct SelectionEffectComponent: Component, Equatable {
 
 	/// How a selected entity is drawn.
 	public struct SelectionEffect: Equatable {
 		enum Kind: Equatable {
+			#if !os(visionOS)
 			case outline(OutlineSelectionEffectStyle)
 			case highlight(HighlightSelectionEffectStyle)
+			#endif
+			case shader(ShaderSelectionEffectInputs)
 		}
 
 		let kind: Kind
 
+		#if !os(visionOS)
 		/// A pixel-exact outline around the entity's silhouette.
 		public static func outline(_ style: OutlineSelectionEffectStyle) -> SelectionEffect {
 			SelectionEffect(kind: .outline(style))
@@ -51,6 +55,19 @@ public struct SelectionEffectComponent: Component, Equatable {
 		public static func highlight(_ style: HighlightSelectionEffectStyle) -> SelectionEffect {
 			SelectionEffect(kind: .highlight(style))
 		}
+		#endif
+
+		/// Your own look: while the entity is selected, a float parameter of its
+		/// `ShaderGraphMaterial`s fades from 0 to 1, and back to 0 when it's
+		/// deselected. Build the look in Reality Composer Pro's Shader Graph from
+		/// that parameter (`inputs.parameterName`).
+		///
+		/// Unlike the outline and highlight, this effect changes the entity's
+		/// materials. It needs no post-processing, so it also works on visionOS.
+		@available(iOS 18.0, macOS 15.0, tvOS 26.0, visionOS 1.0, *)
+		public static func shader(_ inputs: ShaderSelectionEffectInputs) -> SelectionEffect {
+			SelectionEffect(kind: .shader(inputs))
+		}
 	}
 
 	/// The effect drawn for this entity.
@@ -59,10 +76,17 @@ public struct SelectionEffectComponent: Component, Equatable {
 	/// Which meshes in this entity's hierarchy the effect is drawn for.
 	public var meshSelection: MeshSelection
 
+	#if !os(visionOS)
 	/// Selects the entity with the default outline.
 	public init() {
 		self.init(.outline(.default))
 	}
+	#else
+	/// Selects the entity with the default shader effect.
+	public init() {
+		self.init(.shader(.default))
+	}
+	#endif
 
 	/// Selects the entity with `selectionEffect`.
 	public init(_ selectionEffect: SelectionEffect, meshSelection: MeshSelection = .subtree) {
@@ -88,8 +112,8 @@ extension SelectionEffectComponent {
 }
 #endif
 
+#if !os(visionOS)
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
-@available(visionOS, unavailable)
 extension SelectionEffectComponent {
 
 	/// The look of an outline selection effect.
@@ -142,6 +166,38 @@ extension SelectionEffectComponent {
 			self.occludedOpacity = occludedOpacity
 		}
 	}
+}
+#endif
+
+@available(iOS 15.0, macOS 12.0, tvOS 26.0, visionOS 1.0, *)
+extension SelectionEffectComponent {
+
+	/// The inputs of a shader selection effect.
+	public struct ShaderSelectionEffectInputs: Equatable, Sendable {
+		/// The default inputs: a 0.2-second fade in and out of the
+		/// `SelectionIntensity` parameter.
+		public static var `default`: ShaderSelectionEffectInputs { ShaderSelectionEffectInputs() }
+
+		/// The time it takes in seconds for the effect to fade in.
+		public var fadeInDuration: TimeInterval
+
+		/// The time it takes in seconds for the effect to fade out.
+		public var fadeOutDuration: TimeInterval
+
+		/// The name of the float parameter, declared as an input of your Shader
+		/// Graph material, that receives the selection intensity (0…1).
+		public var parameterName: String
+
+		public init(
+			fadeInDuration: TimeInterval = 0.2,
+			fadeOutDuration: TimeInterval = 0.2,
+			parameterName: String = "SelectionIntensity"
+		) {
+			self.fadeInDuration = fadeInDuration
+			self.fadeOutDuration = fadeOutDuration
+			self.parameterName = parameterName
+		}
+	}
 
 	/// Which meshes in a selected entity's hierarchy an effect is drawn for.
 	public enum MeshSelection: Sendable, Equatable {
@@ -158,6 +214,7 @@ extension SelectionEffectComponent {
 	}
 }
 
+#if !os(visionOS)
 // MARK: - Preloading
 
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
@@ -182,12 +239,15 @@ extension SelectionEffectComponent {
 @available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
 @available(visionOS, unavailable)
 extension SelectionEffectComponent {
-	/// The effect as the renderer draws it, with colors resolved to sRGB.
+	/// The effect as the post-process renderer draws it, with colors resolved to
+	/// sRGB; `nil` for effects it doesn't draw.
 	@MainActor
-	var renderStyle: RenderStyle {
+	var renderStyle: RenderStyle? {
 		switch selectionEffect.kind {
+		case .shader:
+			return nil
 		case .outline(let style):
-			RenderStyle(
+			return RenderStyle(
 				kind: .outline,
 				color: Self.srgb(style.color),
 				width: Int(style.width.rounded()),
@@ -195,7 +255,7 @@ extension SelectionEffectComponent {
 				occludedOpacity: style.occludedOpacity
 			)
 		case .highlight(let style):
-			RenderStyle(
+			return RenderStyle(
 				kind: .highlight,
 				color: Self.srgb(style.color),
 				width: 0,
@@ -215,3 +275,4 @@ extension SelectionEffectComponent {
 		return SelectionRenderer.rgba(from: resolved.cgColor)
 	}
 }
+#endif
