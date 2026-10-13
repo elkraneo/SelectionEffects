@@ -135,6 +135,7 @@ private final class ChainedPostProcess: @unchecked Sendable {
 			device: context.device,
 			commandBuffer: context.commandBuffer,
 			source: source,
+			sourceDepth: context.sourceDepthTexture,
 			target: context.targetColorTexture,
 			projection: context.projection
 		)

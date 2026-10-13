@@ -73,7 +73,7 @@ enum OutlineMeshExtraction {
 	/// that `mode` selects.
 	static func collect(
 		from entity: Entity,
-		mode: MeshSelection,
+		mode: SelectionEffectComponent.MeshSelection,
 		cache: OutlineGeometryCache
 	) -> [OutlineSelectedMesh] {
 		cache.pruneReleasedEntities()
@@ -84,7 +84,7 @@ enum OutlineMeshExtraction {
 
 	private static func collect(
 		from entity: Entity,
-		mode: MeshSelection,
+		mode: SelectionEffectComponent.MeshSelection,
 		cache: OutlineGeometryCache,
 		into meshes: inout [OutlineSelectedMesh]
 	) {
@@ -109,7 +109,7 @@ enum OutlineMeshExtraction {
 
 	private static func collectChildren(
 		of entity: Entity,
-		mode: MeshSelection,
+		mode: SelectionEffectComponent.MeshSelection,
 		cache: OutlineGeometryCache,
 		into meshes: inout [OutlineSelectedMesh]
 	) {

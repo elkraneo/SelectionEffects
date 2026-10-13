@@ -24,7 +24,7 @@ struct MeshSelectionTests {
 
 	private func owners(
 		_ entity: Entity,
-		_ mode: MeshSelection
+		_ mode: SelectionEffectComponent.MeshSelection
 	) -> [Entity?] {
 		OutlineMeshExtraction.collect(from: entity, mode: mode, cache: OutlineGeometryCache())
 			.map(\.owner)
@@ -59,9 +59,9 @@ struct MeshSelectionTests {
 	}
 
 	@Test(arguments: [
-		MeshSelection.subtree, .nearestMeshes, .preferDescendants,
+		SelectionEffectComponent.MeshSelection.subtree, .nearestMeshes, .preferDescendants,
 	])
-	func groupWithoutMeshUsesAllChildren(mode: MeshSelection) {
+	func groupWithoutMeshUsesAllChildren(mode: SelectionEffectComponent.MeshSelection) {
 		let group = Entity()
 		let a = ModelEntity(mesh: .generateBox(size: 1), materials: [])
 		let b = ModelEntity(mesh: .generateBox(size: 1), materials: [])

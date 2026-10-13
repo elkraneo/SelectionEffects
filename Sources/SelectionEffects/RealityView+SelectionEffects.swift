@@ -69,6 +69,7 @@ struct SelectionOutlinePostProcess: PostProcessEffect {
 			device: context.device,
 			commandBuffer: context.commandBuffer,
 			source: context.sourceColorTexture,
+			sourceDepth: context.sourceDepthTexture,
 			target: context.targetColorTexture,
 			projection: context.projection
 		)

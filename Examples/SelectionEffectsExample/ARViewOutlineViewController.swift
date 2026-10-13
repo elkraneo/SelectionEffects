@@ -19,7 +19,7 @@ import UIKit
 @available(iOS 15.0, *)
 final class ARViewOutlineViewController: UIViewController {
 	private var arView: ARView!
-	private var selection = OutlineDemoSelection(color: UIColor.systemYellow.cgColor)
+	private var selection = OutlineDemoSelection(color: .systemYellow)
 
 	override func loadView() {
 		// `.nonAR` renders a virtual scene through our own camera; no ARSession is needed.
@@ -56,7 +56,7 @@ import AppKit
 @available(macOS 12.0, *)
 final class ARViewOutlineViewController: NSViewController {
 	private var arView: ARView!
-	private var selection = OutlineDemoSelection(color: NSColor.systemYellow.cgColor)
+	private var selection = OutlineDemoSelection(color: .systemYellow)
 
 	override func loadView() {
 		// On macOS ARView always renders a virtual (non-AR) scene.
@@ -87,11 +87,11 @@ final class ARViewOutlineViewController: NSViewController {
 @available(iOS 15.0, macOS 12.0, *)
 @MainActor
 struct OutlineDemoSelection {
-	let style: OutlineStyle
+	let style: SelectionEffectComponent.OutlineSelectionEffectStyle
 	private(set) var selected: Entity?
 
-	init(color: CGColor) {
-		style = OutlineStyle(color: color, width: 3)
+	init(color: SelectionEffectComponent.Color) {
+		style = .init(color: color, width: 3)
 	}
 
 	/// Selects `entity`, or clears the selection when it's `nil`.

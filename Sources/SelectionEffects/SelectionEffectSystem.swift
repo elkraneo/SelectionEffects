@@ -64,11 +64,9 @@ final class SelectionEffectsHost {
 
 		// Sorted, so the selection only counts as changed when its members change.
 		let items = selected
-			.compactMap { entity -> (entity: Entity, style: OutlineStyle)? in
+			.compactMap { entity -> (entity: Entity, style: RenderStyle, meshes: SelectionEffectComponent.MeshSelection)? in
 				guard let component = entity.components[SelectionEffectComponent.self] else { return nil }
-				switch component.effect.kind {
-				case .outline(let style): return (entity, style)
-				}
+				return (entity, component.renderStyle, component.meshSelection)
 			}
 			.sorted { ObjectIdentifier($0.entity) < ObjectIdentifier($1.entity) }
 		renderer.setSelected(items)

@@ -12,6 +12,28 @@ import RealityKit
 import os
 import simd
 
+// MARK: - Styles
+
+/// A selection effect resolved for drawing (see `SelectionEffectComponent.renderStyle`).
+@available(iOS 15.0, macOS 12.0, tvOS 26.0, *)
+@available(visionOS, unavailable)
+struct RenderStyle: Equatable, Sendable {
+	enum Kind: UInt32, Sendable {
+		case outline = 0
+		case highlight = 1
+	}
+
+	var kind: Kind
+	/// sRGB-encoded RGBA in 0…1.
+	var color: SIMD4<Float>
+	/// Outline width in pixels (0 for highlight).
+	var width: Int
+	/// Highlight coverage; multiplies the color's alpha.
+	var strength: Float
+	/// Alpha multiplier where the selection is hidden behind other geometry.
+	var occludedOpacity: Float
+}
+
 // MARK: - Renderer
 
 /// Draws the selection effects of one view over its rendered frame, in three passes:
@@ -37,13 +59,32 @@ final class SelectionRenderer: @unchecked Sendable {
 	// MARK: Shared state (lock-protected)
 
 	/// State written from @MainActor / any thread, consumed by the render thread.
+	/// Shader-side style, matching `SelectionStyle` in OutlineShaders.metal (32 bytes).
+	struct GPUStyle: Equatable {
+		var color: SIMD4<Float>
+		var occludedOpacity: Float
+		var strength: Float
+		var kind: UInt32
+		var width: Int32
+	}
+
+	/// Matches `DepthParams` in OutlineShaders.metal.
+	struct DepthParams {
+		var useSceneDepth: UInt32
+		var reversedZ: UInt32
+		var epsilon: Float
+	}
+
+	/// The mask holds style indices in 7 bits; bit 7 marks hidden ring pixels.
+	static let maxStyles = 127
+
 	private struct SharedState {
 		// Selected meshes (owners held weakly), only touched on @MainActor.
 		var selection: [OutlineSelectedMesh] = []
 		// Style index (1…255) of each selected mesh, aligned with `selection`.
 		var meshStyles: [UInt32] = []
 		// Styles by index − 1.
-		var styles: [OutlineStyle] = []
+		var styles: [RenderStyle] = []
 		// What the current selection was built from; an unchanged key with new
 		// styles only restyles, without re-reading geometry.
 		var selectionKey: [SelectionKey] = []
@@ -80,6 +121,9 @@ final class SelectionRenderer: @unchecked Sendable {
 
 		// Compiled once per device in prepare(device:).
 		var maskPipeline: (any MTLRenderPipelineState)?
+		// Depth tests among the selected meshes, for standard and reversed Z.
+		var maskDepthLess: (any MTLDepthStencilState)?
+		var maskDepthGreater: (any MTLDepthStencilState)?
 		var dilatePipeline: (any MTLComputePipelineState)?
 		var compositePipeline: (any MTLComputePipelineState)?
 
@@ -131,22 +175,24 @@ final class SelectionRenderer: @unchecked Sendable {
 	/// Identifies what a selection was built from.
 	struct SelectionKey: Equatable {
 		let entity: ObjectIdentifier
-		let meshes: MeshSelection
+		let meshes: SelectionEffectComponent.MeshSelection
 	}
 
 	/// Draws each entity with its style. Re-reads geometry only when the entities
 	/// or their mesh selection change; a style-only change just restyles.
 	@MainActor
-	func setSelected(_ items: [(entity: Entity, style: OutlineStyle)]) {
-		// Deduplicate styles; the mask holds at most 255 of them.
-		var styles: [OutlineStyle] = []
+	func setSelected(
+		_ items: [(entity: Entity, style: RenderStyle, meshes: SelectionEffectComponent.MeshSelection)]
+	) {
+		// Deduplicate styles; the mask holds at most `maxStyles` of them.
+		var styles: [RenderStyle] = []
 		let itemStyles: [UInt32] = items.map { item in
 			if let i = styles.firstIndex(of: item.style) { return UInt32(i + 1) }
-			guard styles.count < 255 else { return UInt32(styles.count) }
+			guard styles.count < Self.maxStyles else { return UInt32(styles.count) }
 			styles.append(item.style)
 			return UInt32(styles.count)
 		}
-		let key = items.map { SelectionKey(entity: ObjectIdentifier($0.entity), meshes: $0.style.meshes) }
+		let key = items.map { SelectionKey(entity: ObjectIdentifier($0.entity), meshes: $0.meshes) }
 
 		let restyleOnly = lock.withLock { () -> Bool in
 			guard key == shared.selectionKey else { return false }
@@ -160,7 +206,7 @@ final class SelectionRenderer: @unchecked Sendable {
 		var meshes: [OutlineSelectedMesh] = []
 		var meshItems: [Int] = []
 		for (index, item) in items.enumerated() {
-			let collected = OutlineMeshExtraction.collect(from: item.entity, mode: item.style.meshes, cache: cache)
+			let collected = OutlineMeshExtraction.collect(from: item.entity, mode: item.meshes, cache: cache)
 			meshes += collected
 			meshItems += Array(repeating: index, count: collected.count)
 		}
@@ -177,7 +223,7 @@ final class SelectionRenderer: @unchecked Sendable {
 	}
 
 	/// The selection as the render thread will see it (for tests).
-	var selectionState: (meshStyles: [UInt32], styles: [OutlineStyle], awaitingUpload: Bool) {
+	var selectionState: (meshStyles: [UInt32], styles: [RenderStyle], awaitingUpload: Bool) {
 		lock.withLock { (shared.meshStyles, shared.styles, shared.pendingUpload != nil) }
 	}
 
@@ -238,6 +284,13 @@ final class SelectionRenderer: @unchecked Sendable {
 		maskDesc.vertexDescriptor = vd
 		do {
 			render.maskPipeline = try device.makeRenderPipelineState(descriptor: maskDesc)
+			for compare in [MTLCompareFunction.less, .greater] {
+				let desc = MTLDepthStencilDescriptor()
+				desc.depthCompareFunction = compare
+				desc.isDepthWriteEnabled = true
+				let state = device.makeDepthStencilState(descriptor: desc)
+				if compare == .less { render.maskDepthLess = state } else { render.maskDepthGreater = state }
+			}
 		} catch {
 			Self.logger.error("Failed to build mask pipeline: \(error.localizedDescription, privacy: .public)")
 		}
@@ -293,6 +346,7 @@ final class SelectionRenderer: @unchecked Sendable {
 		device: any MTLDevice,
 		commandBuffer: any MTLCommandBuffer,
 		source: any MTLTexture,
+		sourceDepth: (any MTLTexture)?,
 		target: any MTLTexture,
 		projection: simd_float4x4
 	) {
@@ -301,6 +355,7 @@ final class SelectionRenderer: @unchecked Sendable {
 				device: device,
 				cb: commandBuffer,
 				source: source,
+				sourceDepth: sourceDepth,
 				target: target,
 				projection: projection
 			)
@@ -312,6 +367,7 @@ final class SelectionRenderer: @unchecked Sendable {
 		device: any MTLDevice,
 		cb: any MTLCommandBuffer,
 		source: any MTLTexture,
+		sourceDepth: (any MTLTexture)?,
 		target: any MTLTexture,
 		projection: simd_float4x4
 	) {
@@ -327,7 +383,7 @@ final class SelectionRenderer: @unchecked Sendable {
 				modelMatrices: shared.modelMatrices,
 				meshStyles: shared.meshStyles,
 				viewMatrix: shared.viewMatrix,
-				palette: Self.palette(shared.styles)
+				styles: Self.gpuStyles(shared.styles)
 			)
 			shared.pendingUpload = nil
 			return snapshot
@@ -378,23 +434,35 @@ final class SelectionRenderer: @unchecked Sendable {
 			return
 		}
 
-		// Pass 1 — render mesh silhouettes into the mask texture.
-		// No depth-stencil state is set, so the scene is not depth-tested:
-		// the outline is X-ray and shows through occluders.
+		// Depth convention of this projection: RealityKit may use reversed Z.
+		let reversedZ = Self.isReversedZ(projection)
+		let sceneDepth = Self.readableDepth(sourceDepth)
+		var depthParams = DepthParams(
+			useSceneDepth: sceneDepth == nil ? 0 : 1,
+			reversedZ: reversedZ ? 1 : 0,
+			epsilon: reversedZ ? 1e-5 : 1e-4
+		)
+
+		// Pass 1 — render the selected meshes into the mask, depth-testing them
+		// against each other only, so the depth attachment holds the nearest
+		// selected surface. The scene's own depth is compared in later passes.
 		let rpd = MTLRenderPassDescriptor()
 		rpd.colorAttachments[0].texture = maskTex
 		rpd.colorAttachments[0].loadAction = .clear
 		rpd.colorAttachments[0].storeAction = .store
 		rpd.depthAttachment.texture = depthTex
 		rpd.depthAttachment.loadAction = .clear
-		rpd.depthAttachment.storeAction = .dontCare
-		rpd.depthAttachment.clearDepth = 1.0
+		rpd.depthAttachment.storeAction = .store
+		rpd.depthAttachment.clearDepth = reversedZ ? 0.0 : 1.0
 		// On any encoder failure, still write the frame so it isn't dropped.
 		guard let renc = cb.makeRenderCommandEncoder(descriptor: rpd) else {
 			blit(from: source, to: target, cb: cb)
 			return
 		}
 		renc.setRenderPipelineState(maskPipeline)
+		if let state = reversedZ ? render.maskDepthGreater : render.maskDepthLess {
+			renc.setDepthStencilState(state)
+		}
 		let viewProjection = projection * frame.viewMatrix
 		for (mesh, modelMatrix, style) in drawables {
 			var mvp = viewProjection * modelMatrix
@@ -416,7 +484,11 @@ final class SelectionRenderer: @unchecked Sendable {
 		}
 		renc.endEncoding()
 
-		// Pass 2 — dilate the mask into an outline ring.
+		// Without scene depth, the mask depth stands in; `useSceneDepth = 0`
+		// makes the shaders treat everything as visible.
+		let depthForCompare = sceneDepth ?? depthTex
+
+		// Pass 2 — grow outline rings around the silhouettes.
 		guard let cenc1 = cb.makeComputeCommandEncoder() else {
 			blit(from: source, to: target, cb: cb)
 			return
@@ -424,15 +496,18 @@ final class SelectionRenderer: @unchecked Sendable {
 		cenc1.setComputePipelineState(dilatePipeline)
 		cenc1.setTexture(maskTex, index: 0)
 		cenc1.setTexture(edgeTex, index: 1)
-		var maxWidth = frame.palette.widths.max() ?? 0
+		cenc1.setTexture(depthTex, index: 2)
+		cenc1.setTexture(depthForCompare, index: 3)
+		var maxWidth = frame.styles.map(\.width).max() ?? 0
 		cenc1.setBytes(&maxWidth, length: MemoryLayout<Int32>.size, index: 0)
-		frame.palette.widths.withUnsafeBytes {
+		frame.styles.withUnsafeBytes {
 			cenc1.setBytes($0.baseAddress!, length: $0.count, index: 1)
 		}
+		cenc1.setBytes(&depthParams, length: MemoryLayout<DepthParams>.stride, index: 2)
 		dispatch(cenc1, w: w, h: h)
 		cenc1.endEncoding()
 
-		// Pass 3 — composite the outline color over the source frame.
+		// Pass 3 — blend rings and highlight fills over the source frame.
 		guard let cenc2 = cb.makeComputeCommandEncoder() else {
 			blit(from: source, to: target, cb: cb)
 			return
@@ -441,28 +516,61 @@ final class SelectionRenderer: @unchecked Sendable {
 		cenc2.setTexture(source, index: 0)
 		cenc2.setTexture(edgeTex, index: 1)
 		cenc2.setTexture(output.texture, index: 2)
-		frame.palette.colors.withUnsafeBytes {
+		cenc2.setTexture(maskTex, index: 3)
+		cenc2.setTexture(depthTex, index: 4)
+		cenc2.setTexture(depthForCompare, index: 5)
+		frame.styles.withUnsafeBytes {
 			cenc2.setBytes($0.baseAddress!, length: $0.count, index: 0)
 		}
 		var encodeSRGB: UInt32 = output.encodeSRGB ? 1 : 0
 		cenc2.setBytes(&encodeSRGB, length: MemoryLayout<UInt32>.size, index: 1)
+		cenc2.setBytes(&depthParams, length: MemoryLayout<DepthParams>.stride, index: 2)
 		dispatch(cenc2, w: w, h: h)
 		cenc2.endEncoding()
 	}
 
 	// MARK: - Helpers
 
-	/// Per-style shader inputs, indexed by style (index 0 is unused): linear
-	/// colors for the composite pass and pixel widths for the dilate pass.
-	static func palette(_ styles: [OutlineStyle]) -> (colors: [SIMD4<Float>], widths: [Int32]) {
-		var colors: [SIMD4<Float>] = [.zero]
-		var widths: [Int32] = [0]
-		for style in styles {
-			colors.append(linear(fromSRGB: style.color))
-			widths.append(Int32(clampWidth(style.width)))
-		}
-		return (colors, widths)
+	/// Per-style shader inputs, indexed by style (index 0 is unused), with
+	/// colors converted to linear and widths clamped.
+	static func gpuStyles(_ styles: [RenderStyle]) -> [GPUStyle] {
+		[GPUStyle(color: .zero, occludedOpacity: 1, strength: 0, kind: 0, width: 0)]
+			+ styles.map {
+				GPUStyle(
+					color: linear(fromSRGB: $0.color),
+					occludedOpacity: min(max($0.occludedOpacity, 0), 1),
+					strength: min(max($0.strength, 0), 1),
+					kind: $0.kind.rawValue,
+					width: Int32(clampWidth($0.width))
+				)
+			}
 	}
+
+	/// Whether `projection` maps nearer points to larger depth (reversed Z).
+	static func isReversedZ(_ projection: simd_float4x4) -> Bool {
+		func depth(at z: Float) -> Float {
+			let clip = projection * SIMD4<Float>(0, 0, z, 1)
+			return clip.z / clip.w
+		}
+		return depth(at: -1) > depth(at: -10)
+	}
+
+	/// The scene depth texture if the shaders can read it directly (a plain 2D
+	/// 32-bit float depth texture); otherwise nil, and occlusion is ignored.
+	private static func readableDepth(_ texture: (any MTLTexture)?) -> (any MTLTexture)? {
+		guard let texture, texture.textureType == .type2D,
+			texture.pixelFormat == .depth32Float || texture.pixelFormat == .depth32Float_stencil8
+		else {
+			if let texture, !loggedUnreadableDepth {
+				loggedUnreadableDepth = true
+				logger.notice("Scene depth (\(texture.pixelFormat.rawValue), type \(texture.textureType.rawValue)) can't be read; occludedOpacity is ignored.")
+			}
+			return nil
+		}
+		return texture
+	}
+
+	private nonisolated(unsafe) static var loggedUnreadableDepth = false
 
 	private static func makeGPUMesh(_ data: OutlineMeshData, device: any MTLDevice) -> GPUMesh? {
 		guard
@@ -557,7 +665,7 @@ final class SelectionRenderer: @unchecked Sendable {
 				w: w,
 				h: h,
 				format: .depth32Float,
-				usage: .renderTarget
+				usage: [.renderTarget, .shaderRead]
 			),
 			let edge = makeTexture(
 				device: device,

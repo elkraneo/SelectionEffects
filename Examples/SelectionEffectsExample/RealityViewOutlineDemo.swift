@@ -73,6 +73,8 @@ struct RealityViewOutlineDemo: View {
 		}
 		selected?.components.remove(SelectionEffectComponent.self)
 		selected = (model === selected) ? nil : model
-		selected?.components.set(SelectionEffectComponent(.outline(.init(color: .yellow, width: 3))))
+		// Outline in yellow; the parts hidden behind other geometry at 30%, like
+		// Reality Composer Pro.
+		selected?.components.set(SelectionEffectComponent(.outline(.init(color: .systemYellow, width: 3, occludedOpacity: 0.3))))
 	}
 }
