@@ -7,7 +7,7 @@
 using namespace metal;
 
 // One entry per selection style, indexed by style (index 0 is unused).
-// Matches `SelectionRenderer.GPUStyle`.
+// Matches `SelectionCompositor.GPUStyle`.
 struct SelectionStyle {
     float4 color;            // linear RGB + blend alpha
     float  occludedOpacity;  // alpha multiplier where the selection is hidden
@@ -16,6 +16,7 @@ struct SelectionStyle {
     int    width;            // outline width in pixels (0 for highlight)
 };
 
+// Matches `SelectionCompositor.DepthParams`.
 struct DepthParams {
     uint  useSceneDepth;     // 0: no scene depth, treat everything as visible
     uint  reversedZ;         // 1: nearer is larger
@@ -24,11 +25,25 @@ struct DepthParams {
 
 constant uint kOccludedBit = 0x80;
 
-// MARK: - Pass 1: Mask
+// How the two depth inputs of the dilate and composite kernels are stored
+// (set per pipeline by `SelectionCompositor`):
+// false: a depth texture (`depth32Float`, `depth32Float_stencil8`), read as depth2d;
+// true:  a float color texture (`r32Float`, `r16Float`; e.g. a ray-march
+//        distance), read as texture2d, its red channel holding the depth.
+constant bool kMaskDepthIsFloat  [[function_constant(0)]];
+constant bool kSceneDepthIsFloat [[function_constant(1)]];
+constant bool kMaskDepthIsDepth  = !kMaskDepthIsFloat;
+constant bool kSceneDepthIsDepth = !kSceneDepthIsFloat;
+
+static inline float loadDepth(depth2d<float, access::read> t, uint2 p) { return t.read(p); }
+static inline float loadDepth(texture2d<float, access::read> t, uint2 p) { return t.read(p).r; }
+
+// MARK: - Pass 1: Mask (RealityKit path)
 
 // Renders the selected meshes into an R8Uint texture holding each pixel's style
 // index (1…127; 0 = not selected), with depth testing among the selected meshes
-// so the depth attachment ends up with the nearest selected surface.
+// so the depth attachment ends up with the nearest selected surface. Other
+// renderers write their own mask and mask depth and start at pass 2.
 
 struct MaskUniforms {
     float4x4 mvp;
@@ -54,36 +69,51 @@ fragment uint outlineMaskFragment(
 // Silhouette-edge pixels are unreliable: the selected mesh only grazes them and
 // the scene's rasterization can differ by a pixel. So, like Reality Composer
 // Pro's selection shader, take the nearest selected depth in a 3x3 neighborhood
-// and the farthest scene depth around the same spot before comparing.
+// and the farthest scene depth around the same spot before comparing. A pixel
+// counts as selected where the mask holds a style, so the mask depth needs no
+// clear value of its own.
+template <typename MaskDepth, typename SceneDepth>
 static bool isOccluded(
     uint2 p,
-    depth2d<float, access::read> maskDepth,
-    depth2d<float, access::read> sceneDepth,
+    texture2d<uint, access::read> maskTex,
+    MaskDepth maskDepth,
+    SceneDepth sceneDepth,
     constant DepthParams& depth
 ) {
     if (depth.useSceneDepth == 0) return false;
     const bool rev = depth.reversedZ != 0;
-    const int mw = int(maskDepth.get_width()), mh = int(maskDepth.get_height());
+    const int mw = int(maskTex.get_width()), mh = int(maskTex.get_height());
     const int sw = int(sceneDepth.get_width()), sh = int(sceneDepth.get_height());
     const float2 scale = float2(sw, sh) / float2(mw, mh);
-    const float clearDepth = rev ? 0.0 : 1.0;
 
-    float selected = clearDepth;
-    float scene = rev ? 1.0 : 0.0;
+    bool found = false;
+    float selected = 0.0;
+    float scene = rev ? INFINITY : -INFINITY;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             const int2 q = clamp(int2(p) + int2(dx, dy), int2(0), int2(mw - 1, mh - 1));
-            const float m = maskDepth.read(uint2(q));
-            if (m != clearDepth) selected = rev ? max(selected, m) : min(selected, m);  // nearest
+            if (maskTex.read(uint2(q)).r != 0) {
+                const float m = loadDepth(maskDepth, uint2(q));
+                selected = !found ? m : (rev ? max(selected, m) : min(selected, m));  // nearest
+                found = true;
+            }
             const int2 sq = clamp(int2(float2(q) * scale), int2(0), int2(sw - 1, sh - 1));
-            const float d = sceneDepth.read(uint2(sq));
+            const float d = loadDepth(sceneDepth, uint2(sq));
             scene = rev ? min(scene, d) : max(scene, d);                               // farthest
         }
     }
-    if (selected == clearDepth) return false;
+    if (!found) return false;
     return rev ? selected < scene - depth.epsilon
                : selected > scene + depth.epsilon;
 }
+
+// Picks the instantiation of `isOccluded` matching this pipeline's depth inputs.
+#define SELECTION_IS_OCCLUDED(p) ( \
+    kMaskDepthIsFloat \
+        ? (kSceneDepthIsFloat ? isOccluded(p, maskTex, maskDepthF, sceneDepthF, depth) \
+                              : isOccluded(p, maskTex, maskDepthF, sceneDepthD, depth)) \
+        : (kSceneDepthIsFloat ? isOccluded(p, maskTex, maskDepthD, sceneDepthF, depth) \
+                              : isOccluded(p, maskTex, maskDepthD, sceneDepthD, depth)))
 
 // MARK: - Pass 2: Dilate
 
@@ -94,8 +124,10 @@ static bool isOccluded(
 kernel void outlineDilate(
     texture2d<uint, access::read>  maskTex     [[texture(0)]],
     texture2d<uint, access::write> edgeTex     [[texture(1)]],
-    depth2d<float, access::read>   maskDepth   [[texture(2)]],
-    depth2d<float, access::read>   sceneDepth  [[texture(3)]],
+    depth2d<float, access::read>   maskDepthD  [[texture(2), function_constant(kMaskDepthIsDepth)]],
+    depth2d<float, access::read>   sceneDepthD [[texture(3), function_constant(kSceneDepthIsDepth)]],
+    texture2d<float, access::read> maskDepthF  [[texture(6), function_constant(kMaskDepthIsFloat)]],
+    texture2d<float, access::read> sceneDepthF [[texture(7), function_constant(kSceneDepthIsFloat)]],
     constant int32_t&              maxWidth    [[buffer(0)]],
     constant SelectionStyle*       styles      [[buffer(1)]],
     constant DepthParams&          depth       [[buffer(2)]],
@@ -132,7 +164,7 @@ kernel void outlineDilate(
     }
 
     uint edge = bestStyle;
-    if (bestStyle != 0 && isOccluded(bestPixel, maskDepth, sceneDepth, depth)) {
+    if (bestStyle != 0 && SELECTION_IS_OCCLUDED(bestPixel)) {
         edge |= kOccludedBit;
     }
     edgeTex.write(uint4(edge), gid);
@@ -141,7 +173,7 @@ kernel void outlineDilate(
 // MARK: - Pass 3: Composite
 
 // Linear -> sRGB transfer, for writing through a non-sRGB view of an sRGB
-// target (see SelectionRenderer.writableTarget).
+// target (see SelectionCompositor.writableTarget).
 static float3 encodeSRGB(float3 c) {
     c = saturate(c);
     return select(1.055 * pow(c, 1.0 / 2.4) - 0.055, 12.92 * c, c <= 0.0031308);
@@ -154,8 +186,10 @@ kernel void outlineComposite(
     texture2d<uint, access::read>   edgeMask     [[texture(1)]],
     texture2d<float, access::write> targetColor  [[texture(2)]],
     texture2d<uint, access::read>   maskTex      [[texture(3)]],
-    depth2d<float, access::read>    maskDepth    [[texture(4)]],
-    depth2d<float, access::read>    sceneDepth   [[texture(5)]],
+    depth2d<float, access::read>    maskDepthD   [[texture(4), function_constant(kMaskDepthIsDepth)]],
+    depth2d<float, access::read>    sceneDepthD  [[texture(5), function_constant(kSceneDepthIsDepth)]],
+    texture2d<float, access::read>  maskDepthF   [[texture(6), function_constant(kMaskDepthIsFloat)]],
+    texture2d<float, access::read>  sceneDepthF  [[texture(7), function_constant(kSceneDepthIsFloat)]],
     constant SelectionStyle*        styles       [[buffer(0)]],
     constant uint&                  encodeOutput [[buffer(1)]],
     constant DepthParams&           depth        [[buffer(2)]],
@@ -177,7 +211,7 @@ kernel void outlineComposite(
         const uint fillStyle = maskTex.read(gid).r;
         if (fillStyle != 0 && styles[fillStyle].kind == 1) {
             const SelectionStyle s = styles[fillStyle];
-            const bool hidden = isOccluded(gid, maskDepth, sceneDepth, depth);
+            const bool hidden = SELECTION_IS_OCCLUDED(gid);
             const float alpha = s.color.a * s.strength * (hidden ? s.occludedOpacity : 1.0);
             color = mix(color, float4(s.color.rgb, 1.0), saturate(alpha));
         }
