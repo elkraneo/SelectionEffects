@@ -5,7 +5,7 @@ Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffect
 ## Install
 
 ```swift
-.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.2.1")
+.package(url: "https://github.com/elkraneo/SelectionEffects.git", from: "0.3.0")
 ```
 
 | | `RealityView` (SwiftUI) | `ARView` (UIKit / AppKit) |
@@ -94,6 +94,38 @@ arView.removeSelectionEffects()
 
 Render callbacks you've already set are kept and run before the effects.
 
+## Use with your own Metal renderer
+
+The outline and highlight passes don't depend on RealityKit. `SelectionCompositor` takes a selection mask your renderer draws and composites the effects over your frame, so a rasterizer or a ray marcher gets the same constant-width outlines:
+
+- `mask`: an `r8Uint` texture the size of the frame, holding each selected pixel's 1-based index into `styles` (0 elsewhere).
+- `maskDepth` (optional): the nearest selected surface's depth at each masked pixel.
+- `sceneDepth` (optional): the depth of the whole frame; it can be a different size from the mask.
+
+Depths can be depth textures (`depth32Float`) or float color textures (`r32Float`, `r16Float`), such as a ray marcher's hit distances; `DepthComparison` says how they compare (`.standard`, `.reversed`, `.distance()`). With both depths, hidden parts are drawn at the style's `occludedOpacity`; without them, everything is drawn as visible.
+
+```swift
+let compositor = try SelectionCompositor(device: device)
+let accent = SelectionCompositor.srgbComponents(of: NSColor.controlAccentColor.cgColor) ?? [0, 0.48, 1, 1]
+
+// Mask index 1: the selection; index 2: the object under the pointer.
+try compositor.encode(
+    commandBuffer: commandBuffer,
+    source: frame,              // your rendered frame
+    target: drawable.texture,   // same size, shader-writable, not `frame`
+    mask: selectionMask,
+    maskDepth: selectionDistance,
+    sceneDepth: sceneDistance,
+    styles: [
+        .outline(color: accent, width: 2, occludedOpacity: 0.3),
+        .highlight(color: accent, strength: 0.15),
+    ],
+    depth: .distance()
+)
+```
+
+Colors are sRGB-encoded RGBA; widths are in pixels, at most 32. `encode` validates its inputs and throws before encoding anything when one is unusable; copy `source` to `target` yourself if the frame must still be shown. The compositor is safe to use from any thread and can serve several views. It's available on every supported platform, visionOS included.
+
 ## Notes
 
 - Call `SelectionEffectComponent.preloadGeometry(of:)` after loading selectable entities. The first read of a mesh is slow (~100 ms for 46k vertices); later frames reuse it.
@@ -102,7 +134,7 @@ Render callbacks you've already set are kept and run before the effects.
 - If your own systems move selected entities, run them before `SelectionEffectSystem` (`static var dependencies: [SystemDependency] { [.before(SelectionEffectSystem.self)] }`), or outlines lag a frame behind.
 - `installSelectionEffects()` attaches the post-process on the first frame. On macOS 27, setting a `RealityView`'s `customPostProcessing` before the view has rendered crashes inside RealityKit, even with a pass-through effect. Reported as FB25173230; details and a standalone reproduction: [Docs/PostProcessTiming.md](Docs/PostProcessTiming.md).
 - `installSelectionEffects()` adds one hidden entity named `SelectionEffects` to the view's content (it carries the view's renderer).
-- Run-tested on macOS 27, with RealityView and ARView, including `.shader`. iOS, tvOS and visionOS are build-tested.
+- Run-tested on macOS 27, with RealityView and ARView, including `.shader`. iOS, tvOS and visionOS are build-tested. `SelectionCompositor` is tested offscreen with pixel checks.
 
 ### Known limitations
 
