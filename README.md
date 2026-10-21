@@ -1,5 +1,3 @@
-# SelectionEffects
-
 ![SelectionEffects: selection effects for RealityKit, shaped like HoverEffectComponent](.github/banner.png)
 
 Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffectComponent`: add a component to select an entity, remove it to deselect. The outline and highlight are drawn as a Metal post-process: they keep a constant pixel width, follow moving entities, and leave your entities' meshes and materials untouched. The `.shader` effect drives an input of your own materials instead.
