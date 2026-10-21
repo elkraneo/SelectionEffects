@@ -1,5 +1,7 @@
 # SelectionEffects
 
+![SelectionEffects: selection effects for RealityKit, shaped like HoverEffectComponent](.github/banner.png)
+
 Selection effects for RealityKit entities, shaped like RealityKit's `HoverEffectComponent`: add a component to select an entity, remove it to deselect. The outline and highlight are drawn as a Metal post-process: they keep a constant pixel width, follow moving entities, and leave your entities' meshes and materials untouched. The `.shader` effect drives an input of your own materials instead.
 
 ## Install
@@ -26,6 +28,8 @@ entity.components.set(SelectionEffectComponent())   // default: outline in the s
 entity.components.remove(SelectionEffectComponent.self)
 ```
 
+![Three white shapes on a gray floor, a cube, a sphere and a cylinder, the cube and cylinder slowly turning. Selection moves from one to the next: first the cube gets a yellow outline that follows its edges as it turns, then the sphere is tinted orange by the highlight, then the cylinder's own material fades from white to magenta through the shader effect. At the end all three are selected at once, then deselected, and the loop starts again.](https://elkraneo.com/content/images/2026/10/effects.gif)
+
 ### Hierarchical behavior
 
 The effect applies to the entity's entire hierarchy: its descendants are drawn with it. For USD stages where a parent prim carries an aggregate mesh, `meshSelection:` can draw only the nearest meshes (`.nearestMeshes`) or the descendants first (`.preferDescendants`).
@@ -37,6 +41,10 @@ The effect applies to the entity's entire hierarchy: its descendants are drawn w
 ```swift
 SelectionEffectComponent(.outline(.init(color: .systemYellow, width: 3, occludedOpacity: 0.3)))
 ```
+
+![A navy wall stands on a gray floor. A white sphere and, below it, a white cube, both outlined in yellow, slide left and right behind the wall and out again. While the sphere is behind the wall, its outline still shows through as a dimmer yellow ring; the cube's outline disappears completely.](https://elkraneo.com/content/images/2026/10/occlusion-hidden-parts.gif)
+
+*Sphere: `occludedOpacity: 0.3`. Cube: `0`.*
 
 `.highlight` fills the silhouette with a translucent color. As with `HoverEffectComponent.HighlightHoverEffectStyle`, `strength` defaults to `1`; higher values are stronger.
 
@@ -55,6 +63,10 @@ let material = try await ShaderGraphMaterial(named: "/Root/SelectionMaterial", f
 entity.model?.materials = [material]
 entity.components.set(SelectionEffectComponent(.shader(.init(fadeInDuration: 0.2, fadeOutDuration: 0.2))))
 ```
+
+![Three white shapes on a gray floor: a cube, a sphere and a cylinder, each with its own Shader Graph material. Selection moves from one to the next and each one fades in its own look: yellow bands scroll up the turning cube, the sphere turns cyan and pulses, the cylinder blends to magenta. At the end all three are selected at once, then fade back to white.](https://elkraneo.com/content/images/2026/10/shader-looks.gif)
+
+*Three Shader Graph materials, each reading `SelectionIntensity`: scrolling bands, a pulse, a tint.*
 
 [Docs/SelectionShaderTemplate.usda](Docs/SelectionShaderTemplate.usda) is a minimal material that blends gray to orange. Set `parameterName:` to use a different input. Apple's `.shader` drives a built-in Hover State node; third-party code can't add Shader Graph nodes, so this effect writes the material input instead. Materials without the input are left unchanged.
 
